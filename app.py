@@ -1,9 +1,10 @@
 import streamlit as st
 import yfinance as yf
-import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
+import plotly.graph_objects as go
 import requests
+
 
 # =========================================================
 # CONFIGURACIÓN
@@ -15,12 +16,44 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("📈 MARKET AI")
-st.subheader("Sistema inteligente de análisis de mercados")
 
-st.divider()
 # =========================================================
-# ALPHA VANTAGE - PRECIO ACTUAL
+# TÍTULO
+# =========================================================
+
+st.title("🤖 MARKET AI")
+
+st.caption(
+    "Sistema experimental de análisis de mercados, "
+    "valoración, fundamentales y análisis técnico."
+)
+
+
+# =========================================================
+# FUNCIONES GENERALES
+# =========================================================
+
+def limpiar_numero(valor):
+    """
+    Convierte valores numéricos de Yahoo Finance
+    en números utilizables.
+    """
+
+    try:
+        if valor is None:
+            return None
+
+        if pd.isna(valor):
+            return None
+
+        return float(valor)
+
+    except Exception:
+        return None
+
+
+# =========================================================
+# ALPHA VANTAGE - PRECIO
 # =========================================================
 
 @st.cache_data(ttl=900)
@@ -29,6 +62,15 @@ def obtener_precio_alpha_vantage(ticker):
     try:
 
         api_key = st.secrets["ALPHA_VANTAGE_API_KEY"]
+
+    except Exception:
+
+        return None, (
+            "No se ha encontrado ALPHA_VANTAGE_API_KEY "
+            "en los Secrets de Streamlit."
+        )
+
+    try:
 
         url = "https://www.alphavantage.co/query"
 
@@ -44,13 +86,16 @@ def obtener_precio_alpha_vantage(ticker):
             timeout=10
         )
 
-        datos = respuesta.json()
+        respuesta.raise_for_status()
 
-        # Comprobar errores de API
+        datos = respuesta.json()
 
         if "Note" in datos:
 
-            return None, "Límite de peticiones alcanzado"
+            return None, (
+                "Alpha Vantage ha alcanzado el límite "
+                "de peticiones gratuitas."
+            )
 
         if "Information" in datos:
 
@@ -58,9 +103,7 @@ def obtener_precio_alpha_vantage(ticker):
 
         if "Error Message" in datos:
 
-            return None, "Símbolo no válido"
-
-        # Obtener cotización
+            return None, "El símbolo introducido no es válido."
 
         quote = datos.get(
             "Global Quote",
@@ -77,7 +120,9 @@ def obtener_precio_alpha_vantage(ticker):
 
         if not precio:
 
-            return None, "Precio no disponible"
+            return None, (
+                "Alpha Vantage no ha devuelto un precio."
+            )
 
         return {
             "precio": float(precio),
@@ -89,28 +134,63 @@ def obtener_precio_alpha_vantage(ticker):
 
         return None, str(error)
 
+
 # =========================================================
-# OBTENER PRECIOS
+# YAHOO FINANCE - DATOS HISTÓRICOS
 # =========================================================
 
 @st.cache_data(ttl=900)
 def obtener_precios(ticker, periodo):
 
-    datos = yf.download(
-        ticker,
-        period=periodo,
-        progress=False,
-        auto_adjust=False
-    )
+    try:
 
-    if isinstance(datos.columns, pd.MultiIndex):
-        datos.columns = datos.columns.get_level_values(0)
+        datos = yf.download(
+            ticker,
+            period=periodo,
+            auto_adjust=False,
+            progress=False
+        )
 
-    return datos
+        if datos is None:
+            return pd.DataFrame()
+
+        if datos.empty:
+            return pd.DataFrame()
+
+        # Algunas versiones de yfinance devuelven
+        # columnas MultiIndex.
+
+        if isinstance(datos.columns, pd.MultiIndex):
+
+            datos.columns = datos.columns.get_level_values(0)
+
+        columnas_necesarias = [
+            "Open",
+            "High",
+            "Low",
+            "Close",
+            "Volume"
+        ]
+
+        columnas_disponibles = [
+            columna
+            for columna in columnas_necesarias
+            if columna in datos.columns
+        ]
+
+        datos = datos[columnas_disponibles].copy()
+
+        return datos.dropna(
+            subset=["Close"]
+        )
+
+    except Exception:
+
+        return pd.DataFrame()
 
 
 # =========================================================
-# OBTENER FUNDAMENTALES
+# YAHOO FINANCE - FUNDAMENTALES
 # =========================================================
 
 @st.cache_data(ttl=3600)
@@ -120,7 +200,12 @@ def obtener_fundamentales(ticker):
 
         empresa = yf.Ticker(ticker)
 
-        return empresa.get_info()
+        info = empresa.info
+
+        if info is None:
+            return {}
+
+        return info
 
     except Exception:
 
@@ -133,19 +218,34 @@ def obtener_fundamentales(ticker):
 
 def calcular_rsi(precios, periodo=14):
 
-    diferencia = precios.diff()
+    delta = precios.diff()
 
-    ganancias = diferencia.clip(lower=0)
+    ganancias = delta.clip(
+        lower=0
+    )
 
-    perdidas = -diferencia.clip(upper=0)
+    perdidas = -delta.clip(
+        upper=0
+    )
 
-    media_ganancias = ganancias.rolling(periodo).mean()
+    media_ganancias = ganancias.rolling(
+        periodo
+    ).mean()
 
-    media_perdidas = perdidas.rolling(periodo).mean()
+    media_perdidas = perdidas.rolling(
+        periodo
+    ).mean()
 
-    rs = media_ganancias / media_perdidas
+    rs = (
+        media_ganancias
+        / media_perdidas.replace(0, np.nan)
+    )
 
-    return 100 - (100 / (1 + rs))
+    rsi = 100 - (
+        100 / (1 + rs)
+    )
+
+    return rsi
 
 
 # =========================================================
@@ -161,101 +261,98 @@ def calcular_score_tecnico(
 ):
 
     score = 0
+
     razones = []
 
-    # Precio vs MA20
-    if precio > ma20:
+    # Precio frente a MA20
 
-        score += 5
+    if pd.notna(ma20):
 
-        razones.append(
-            "Precio por encima de MA20"
-        )
+        if precio > ma20:
 
-    else:
-
-        razones.append(
-            "Precio por debajo de MA20"
-        )
-
-
-    # Precio vs MA50
-    if precio > ma50:
-
-        score += 5
-
-        razones.append(
-            "Precio por encima de MA50"
-        )
-
-    else:
-
-        razones.append(
-            "Precio por debajo de MA50"
-        )
-
-
-    # Precio vs MA200
-    if not pd.isna(ma200):
-
-        if precio > ma200:
-
-            score += 7
+            score += 5
 
             razones.append(
-                "Precio por encima de MA200"
+                "El precio está por encima de la MA20."
             )
 
         else:
 
             razones.append(
-                "Precio por debajo de MA200"
+                "El precio está por debajo de la MA20."
             )
 
-    else:
+    # MA20 frente a MA50
 
-        score += 3
+    if pd.notna(ma20) and pd.notna(ma50):
 
+        if ma20 > ma50:
+
+            score += 5
+
+            razones.append(
+                "La MA20 está por encima de la MA50."
+            )
+
+        else:
+
+            razones.append(
+                "La MA20 está por debajo de la MA50."
+            )
+
+    # MA50 frente a MA200
+
+    if pd.notna(ma50) and pd.notna(ma200):
+
+        if ma50 > ma200:
+
+            score += 7
+
+            razones.append(
+                "La MA50 está por encima de la MA200."
+            )
+
+        else:
+
+            razones.append(
+                "La MA50 está por debajo de la MA200."
+            )
 
     # RSI
-    if 40 <= rsi <= 65:
 
-        score += 8
+    if pd.notna(rsi):
 
-        razones.append(
-            "RSI en zona saludable"
-        )
+        if 40 <= rsi <= 65:
 
-    elif 30 <= rsi < 40:
+            score += 8
 
-        score += 6
+            razones.append(
+                "El RSI se encuentra en una zona relativamente equilibrada."
+            )
 
-        razones.append(
-            "RSI bajo"
-        )
+        elif rsi < 30:
 
-    elif 65 < rsi < 70:
+            score += 6
 
-        score += 5
+            razones.append(
+                "El RSI indica posible sobreventa."
+            )
 
-        razones.append(
-            "RSI elevado"
-        )
+        elif rsi > 70:
 
-    elif rsi <= 30:
+            score += 2
 
-        score += 4
+            razones.append(
+                "El RSI indica posible sobrecompra."
+            )
 
-        razones.append(
-            "RSI en sobreventa"
-        )
+        else:
 
-    else:
+            score += 4
 
-        razones.append(
-            "RSI en sobrecompra"
-        )
-
+            razones.append(
+                "El RSI muestra una situación intermedia."
+            )
 
     return min(score, 25), razones
 
@@ -272,104 +369,122 @@ def calcular_score_valoracion(
 ):
 
     score = 0
+
     razones = []
 
-
     # PER
+
     if pe is not None:
 
-        if 0 < pe < 15:
+        if pe < 15:
 
             score += 8
 
             razones.append(
-                "PER relativamente bajo"
+                "El PER actual es relativamente bajo."
             )
 
-        elif 15 <= pe < 25:
+        elif pe < 25:
 
             score += 6
 
             razones.append(
-                "PER moderado"
+                "El PER actual se encuentra en una zona intermedia."
             )
 
-        elif 25 <= pe < 35:
+        elif pe < 40:
 
             score += 3
 
             razones.append(
-                "PER elevado"
+                "El PER actual es relativamente elevado."
             )
 
-        elif pe >= 35:
+        else:
+
+            score += 1
 
             razones.append(
-                "PER muy elevado"
+                "El PER actual es muy elevado."
             )
 
     else:
 
         razones.append(
-            "PER no disponible"
+            "No hay PER disponible."
         )
 
-
     # Forward PER
+
     if forward_pe is not None:
 
-        if 0 < forward_pe < 15:
+        if forward_pe < 15:
 
             score += 7
 
-        elif 15 <= forward_pe < 25:
+            razones.append(
+                "El PER futuro es relativamente atractivo."
+            )
+
+        elif forward_pe < 25:
 
             score += 5
 
-        elif 25 <= forward_pe < 35:
+            razones.append(
+                "El PER futuro se encuentra en una zona intermedia."
+            )
 
-            score += 3
+        elif forward_pe < 40:
 
+            score += 2
+
+            razones.append(
+                "El PER futuro es elevado."
+            )
 
     # PEG
+
     if peg is not None:
 
-        if 0 < peg < 1:
+        if peg < 1:
 
             score += 6
 
             razones.append(
-                "PEG atractivo"
+                "El PEG puede indicar una valoración atractiva."
             )
 
-        elif 1 <= peg < 2:
+        elif peg < 2:
 
             score += 4
 
             razones.append(
-                "PEG moderado"
+                "El PEG se encuentra en una zona intermedia."
             )
 
-        elif peg >= 2:
+        else:
 
             score += 1
 
             razones.append(
-                "PEG elevado"
+                "El PEG es elevado."
             )
 
+    # Price to Book
 
-    # Price / Book
     if price_to_book is not None:
 
-        if 0 < price_to_book < 3:
+        if price_to_book < 2:
 
             score += 4
 
-        elif price_to_book >= 6:
+        elif price_to_book < 5:
+
+            score += 2
+
+        else:
 
             score += 1
-
 
     return min(score, 25), razones
 
@@ -386,96 +501,110 @@ def calcular_score_fundamentales(
 ):
 
     score = 0
+
     razones = []
 
-
     # ROE
+
     if roe is not None:
 
-        if roe >= 0.20:
+        if roe > 0.20:
 
             score += 8
 
             razones.append(
-                "ROE fuerte"
+                "El ROE es elevado."
             )
 
-        elif roe >= 0.10:
+        elif roe > 0.10:
 
             score += 5
 
             razones.append(
-                "ROE aceptable"
+                "El ROE es razonable."
             )
 
-        elif roe < 0:
+        else:
+
+            score += 2
 
             razones.append(
-                "ROE negativo"
+                "El ROE es relativamente bajo."
             )
 
-
     # Margen
+
     if margen is not None:
 
-        if margen >= 0.20:
+        if margen > 0.20:
 
             score += 7
 
             razones.append(
-                "Margen de beneficio fuerte"
+                "El margen de beneficios es elevado."
             )
 
-        elif margen >= 0.10:
+        elif margen > 0.10:
 
             score += 5
 
             razones.append(
-                "Margen de beneficio saludable"
+                "El margen de beneficios es razonable."
             )
 
-        elif margen < 0:
+        else:
+
+            score += 2
 
             razones.append(
-                "Margen negativo"
+                "El margen de beneficios es reducido."
             )
 
-
     # Deuda
+
     if deuda is not None:
 
         if deuda < 50:
 
-            score += 6
+            score += 5
 
             razones.append(
-                "Nivel de deuda bajo"
+                "El nivel de deuda respecto al capital es reducido."
             )
 
         elif deuda < 100:
 
-            score += 4
+            score += 3
 
-        elif deuda > 200:
+            razones.append(
+                "El nivel de deuda es moderado."
+            )
+
+        else:
 
             score += 1
 
             razones.append(
-                "Nivel de deuda elevado"
+                "El nivel de deuda es elevado."
             )
 
-
     # Flujo de caja
+
     if flujo_caja is not None:
 
         if flujo_caja > 0:
 
-            score += 4
+            score += 5
 
             razones.append(
-                "Flujo de caja libre positivo"
+                "La empresa presenta flujo de caja libre positivo."
             )
 
+        else:
+
+            razones.append(
+                "El flujo de caja libre no es positivo."
+            )
 
     return min(score, 25), razones
 
@@ -490,58 +619,72 @@ def calcular_score_crecimiento(
 ):
 
     score = 0
-    razones = []
 
+    razones = []
 
     if crecimiento_ingresos is not None:
 
-        if crecimiento_ingresos >= 0.20:
-
-            score += 8
-
-            razones.append(
-                "Crecimiento de ingresos fuerte"
-            )
-
-        elif crecimiento_ingresos >= 0.10:
-
-            score += 6
-
-        elif crecimiento_ingresos > 0:
-
-            score += 3
-
-        else:
-
-            razones.append(
-                "Ingresos en decrecimiento"
-            )
-
-
-    if crecimiento_beneficios is not None:
-
-        if crecimiento_beneficios >= 0.20:
+        if crecimiento_ingresos > 0.15:
 
             score += 7
 
             razones.append(
-                "Crecimiento de beneficios fuerte"
+                "Los ingresos presentan un crecimiento elevado."
             )
 
-        elif crecimiento_beneficios >= 0.10:
+        elif crecimiento_ingresos > 0.05:
 
             score += 5
 
-        elif crecimiento_beneficios > 0:
+            razones.append(
+                "Los ingresos presentan crecimiento moderado."
+            )
 
-            score += 3
+        elif crecimiento_ingresos > 0:
+
+            score += 2
+
+            razones.append(
+                "Los ingresos crecen ligeramente."
+            )
 
         else:
 
             razones.append(
-                "Beneficios en decrecimiento"
+                "Los ingresos están decreciendo."
             )
 
+    if crecimiento_beneficios is not None:
+
+        if crecimiento_beneficios > 0.15:
+
+            score += 8
+
+            razones.append(
+                "Los beneficios presentan un crecimiento elevado."
+            )
+
+        elif crecimiento_beneficios > 0.05:
+
+            score += 5
+
+            razones.append(
+                "Los beneficios presentan crecimiento moderado."
+            )
+
+        elif crecimiento_beneficios > 0:
+
+            score += 2
+
+            razones.append(
+                "Los beneficios presentan crecimiento positivo."
+            )
+
+        else:
+
+            razones.append(
+                "Los beneficios están decreciendo."
+            )
 
     return min(score, 15), razones
 
@@ -555,95 +698,171 @@ def calcular_score_riesgo(
     deuda
 ):
 
-    score = 10
+    score = 0
+
     razones = []
 
-
     # Volatilidad
-    if volatilidad > 50:
 
-        score -= 5
+    if volatilidad < 20:
 
-        razones.append(
-            "Volatilidad muy elevada"
-        )
-
-    elif volatilidad > 30:
-
-        score -= 3
+        score += 6
 
         razones.append(
-            "Volatilidad elevada"
+            "La volatilidad histórica es relativamente baja."
         )
 
-    elif volatilidad > 20:
+    elif volatilidad < 35:
 
-        score -= 1
+        score += 4
 
+        razones.append(
+            "La volatilidad histórica es moderada."
+        )
+
+    elif volatilidad < 50:
+
+        score += 2
+
+        razones.append(
+            "La volatilidad histórica es elevada."
+        )
+
+    else:
+
+        score += 1
+
+        razones.append(
+            "La volatilidad histórica es muy elevada."
+        )
 
     # Deuda
+
     if deuda is not None:
 
-        if deuda > 200:
+        if deuda < 50:
 
-            score -= 3
+            score += 4
 
-        elif deuda > 100:
+        elif deuda < 100:
 
-            score -= 1
+            score += 2
 
+        else:
 
-    return max(score, 0), razones
+            score += 1
+
+    else:
+
+        score += 2
+
+    return min(score, 10), razones
 
 
 # =========================================================
-# ANALIZAR
+# INTERFAZ
 # =========================================================
 
-st.header("🔍 Analizar un activo")
+st.sidebar.header(
+    "⚙️ Configuración"
+)
 
-
-ticker = st.text_input(
-    "Introduce el símbolo",
-    value="AAPL",
-    placeholder="AAPL, NVDA, MSFT, TSLA..."
+ticker = st.sidebar.text_input(
+    "Símbolo de la empresa",
+    value="AAPL"
 ).upper().strip()
 
 
-periodo = st.selectbox(
-    "Periodo",
-    ["3mo", "6mo", "1y", "2y", "5y"],
-    index=2
+periodo = st.sidebar.selectbox(
+    "Periodo del gráfico",
+    [
+        "6mo",
+        "1y",
+        "2y",
+        "5y",
+        "10y"
+    ],
+    index=1
 )
 
 
-if st.button("📊 Analizar mercado"):
+st.sidebar.divider()
+
+st.sidebar.subheader(
+    "🎯 Precio para el análisis"
+)
+
+tipo_precio = st.sidebar.radio(
+    "Selecciona el precio",
+    [
+        "Precio automático",
+        "Precio personalizado"
+    ]
+)
+
+
+precio_personalizado = None
+
+
+if tipo_precio == "Precio personalizado":
+
+    precio_personalizado = st.sidebar.number_input(
+        "Precio de entrada",
+        min_value=0.01,
+        value=100.00,
+        step=1.00
+    )
+
+
+analizar = st.sidebar.button(
+    "📊 Analizar mercado",
+    type="primary"
+)
+
+
+# =========================================================
+# INFORMACIÓN INICIAL
+# =========================================================
+
+st.info(
+    "Introduce un ticker en el panel izquierdo "
+    "y pulsa «Analizar mercado»."
+)
+
+
+# =========================================================
+# ANÁLISIS PRINCIPAL
+# =========================================================
+
+if analizar:
 
     if not ticker:
 
-        st.warning(
-            "Introduce un símbolo."
+        st.error(
+            "Debes introducir un ticker."
         )
 
         st.stop()
 
 
-with st.spinner(
-    f"Analizando {ticker}..."
-):
-
-    # =================================================
+    # =====================================================
     # PRECIO ALPHA VANTAGE
-    # =================================================
+    # =====================================================
 
-    precio_alpha, error_alpha = (
-        obtener_precio_alpha_vantage(ticker)
-    )
+    with st.spinner(
+        "Obteniendo precio de mercado..."
+    ):
+
+        precio_alpha, error_alpha = (
+            obtener_precio_alpha_vantage(
+                ticker
+            )
+        )
 
 
-    # =================================================
+    # =====================================================
     # PRECIO DE MERCADO
-    # =================================================
+    # =====================================================
 
     if precio_alpha:
 
@@ -652,10 +871,10 @@ with st.spinner(
         fecha_precio = precio_alpha["fecha"]
 
         st.info(
-            f"💵 Precio de mercado: "
+            f"💵 **Precio de mercado:** "
             f"${precio_mercado:,.2f}  |  "
-            f"Fuente: Alpha Vantage  |  "
-            f"Última sesión: {fecha_precio}"
+            f"**Fuente:** Alpha Vantage  |  "
+            f"**Última sesión:** {fecha_precio}"
         )
 
     else:
@@ -663,604 +882,975 @@ with st.spinner(
         precio_mercado = None
 
         st.warning(
-            f"No se pudo obtener el precio de "
-            f"Alpha Vantage: {error_alpha}"
+            "⚠️ No se pudo obtener el precio mediante "
+            "Alpha Vantage."
+        )
+
+        st.caption(
+            f"Detalle: {error_alpha}"
         )
 
 
-    try:
+    # =====================================================
+    # PRECIO UTILIZADO
+    # =====================================================
 
-        # =================================================
-        # DATOS
-        # =================================================
+    if (
+        tipo_precio == "Precio personalizado"
+        and precio_personalizado is not None
+    ):
+
+        precio_analisis = float(
+            precio_personalizado
+        )
+
+        st.success(
+            f"🎯 MARKET AI utilizará "
+            f"**${precio_analisis:,.2f}** "
+            f"como precio para el análisis."
+        )
+
+    elif precio_mercado is not None:
+
+        precio_analisis = float(
+            precio_mercado
+        )
+
+        st.success(
+            f"🎯 MARKET AI utilizará el precio "
+            f"actual de **${precio_analisis:,.2f}**."
+        )
+
+    else:
+
+        precio_analisis = None
+
+
+    # =====================================================
+    # DATOS HISTÓRICOS
+    # =====================================================
+
+    with st.spinner(
+        "Obteniendo datos históricos..."
+    ):
 
         datos = obtener_precios(
             ticker,
             periodo
         )
 
+
+    # =====================================================
+    # FUNDAMENTALES
+    # =====================================================
+
+    with st.spinner(
+        "Obteniendo fundamentales..."
+    ):
+
         fundamentales = obtener_fundamentales(
             ticker
         )
 
 
-            if datos.empty:
+    if datos.empty:
 
-                st.error(
-                    "No se han encontrado datos."
+        st.error(
+            "❌ No se han encontrado datos históricos "
+            f"para {ticker}."
+        )
+
+        st.stop()
+
+
+    # =====================================================
+    # PRECIO HISTÓRICO
+    # =====================================================
+
+    try:
+
+        precio_historico = float(
+            datos["Close"].iloc[-1]
+        )
+
+        precio_anterior = float(
+            datos["Close"].iloc[-2]
+        )
+
+    except Exception:
+
+        st.error(
+            "No se ha podido interpretar el precio histórico."
+        )
+
+        st.stop()
+
+
+    variacion = (
+        (
+            precio_historico
+            - precio_anterior
+        )
+        / precio_anterior
+    ) * 100
+
+
+    maximo = float(
+        datos["High"].max()
+    )
+
+    minimo = float(
+        datos["Low"].min()
+    )
+
+
+    # =====================================================
+    # MEDIAS MÓVILES
+    # =====================================================
+
+    datos["MA20"] = (
+        datos["Close"]
+        .rolling(20)
+        .mean()
+    )
+
+    datos["MA50"] = (
+        datos["Close"]
+        .rolling(50)
+        .mean()
+    )
+
+    datos["MA200"] = (
+        datos["Close"]
+        .rolling(200)
+        .mean()
+    )
+
+
+    ma20 = datos["MA20"].iloc[-1]
+
+    ma50 = datos["MA50"].iloc[-1]
+
+    ma200 = datos["MA200"].iloc[-1]
+
+
+    # =====================================================
+    # RSI
+    # =====================================================
+
+    datos["RSI"] = calcular_rsi(
+        datos["Close"]
+    )
+
+    rsi = float(
+        datos["RSI"].iloc[-1]
+    )
+
+
+    # =====================================================
+    # VOLATILIDAD
+    # =====================================================
+
+    retornos = (
+        datos["Close"]
+        .pct_change()
+    )
+
+    volatilidad = (
+        retornos.std()
+        * np.sqrt(252)
+        * 100
+    )
+
+
+    # =====================================================
+    # FUNDAMENTALES
+    # =====================================================
+
+    nombre = fundamentales.get(
+        "longName",
+        ticker
+    )
+
+    sector = fundamentales.get(
+        "sector",
+        "N/D"
+    )
+
+    pe = limpiar_numero(
+        fundamentales.get(
+            "trailingPE"
+        )
+    )
+
+    forward_pe = limpiar_numero(
+        fundamentales.get(
+            "forwardPE"
+        )
+    )
+
+    peg = limpiar_numero(
+        fundamentales.get(
+            "pegRatio"
+        )
+    )
+
+    price_to_book = limpiar_numero(
+        fundamentales.get(
+            "priceToBook"
+        )
+    )
+
+    roe = limpiar_numero(
+        fundamentales.get(
+            "returnOnEquity"
+        )
+    )
+
+    margen = limpiar_numero(
+        fundamentales.get(
+            "profitMargins"
+        )
+    )
+
+    deuda = limpiar_numero(
+        fundamentales.get(
+            "debtToEquity"
+        )
+    )
+
+    flujo_caja = limpiar_numero(
+        fundamentales.get(
+            "freeCashflow"
+        )
+    )
+
+    crecimiento_ingresos = limpiar_numero(
+        fundamentales.get(
+            "revenueGrowth"
+        )
+    )
+
+    crecimiento_beneficios = limpiar_numero(
+        fundamentales.get(
+            "earningsGrowth"
+        )
+    )
+
+    target_price = limpiar_numero(
+        fundamentales.get(
+            "targetMeanPrice"
+        )
+    )
+
+
+    # =====================================================
+    # SCORES
+    # =====================================================
+
+    score_tecnico, razones_tecnico = (
+        calcular_score_tecnico(
+            precio_historico,
+            ma20,
+            ma50,
+            ma200,
+            rsi
+        )
+    )
+
+
+    score_valoracion, razones_valoracion = (
+        calcular_score_valoracion(
+            pe,
+            forward_pe,
+            peg,
+            price_to_book
+        )
+    )
+
+
+    score_fundamentales, razones_fundamentales = (
+        calcular_score_fundamentales(
+            roe,
+            margen,
+            deuda,
+            flujo_caja
+        )
+    )
+
+
+    score_crecimiento, razones_crecimiento = (
+        calcular_score_crecimiento(
+            crecimiento_ingresos,
+            crecimiento_beneficios
+        )
+    )
+
+
+    score_riesgo, razones_riesgo = (
+        calcular_score_riesgo(
+            volatilidad,
+            deuda
+        )
+    )
+
+
+    score_total = (
+        score_tecnico
+        + score_valoracion
+        + score_fundamentales
+        + score_crecimiento
+        + score_riesgo
+    )
+
+
+    # =====================================================
+    # TENDENCIA
+    # =====================================================
+
+    if score_tecnico >= 20:
+
+        tendencia = "🟢 FUERTE"
+
+    elif score_tecnico >= 13:
+
+        tendencia = "🟡 MODERADA"
+
+    else:
+
+        tendencia = "🔴 DÉBIL"
+
+
+    # =====================================================
+    # RESULTADO
+    # =====================================================
+
+    st.success(
+        f"✅ Análisis completado: {nombre}"
+    )
+
+    st.write(
+        f"**Sector:** {sector}"
+    )
+
+
+    # =====================================================
+    # MÉTRICAS DE MERCADO
+    # =====================================================
+
+    st.divider()
+
+    st.header(
+        "💵 Mercado"
+    )
+
+    col1, col2, col3, col4 = st.columns(4)
+
+
+    with col1:
+
+        st.metric(
+            "Precio histórico",
+            f"${precio_historico:,.2f}",
+            f"{variacion:+.2f}%"
+        )
+
+
+    with col2:
+
+        if precio_analisis is not None:
+
+            diferencia_precio = (
+                (
+                    precio_analisis
+                    - precio_historico
                 )
-
-                st.stop()
-
-
-            # =================================================
-            # MERCADO
-            # =================================================
-
-            precio = float(
-                datos["Close"].iloc[-1]
-            )
-
-            precio_anterior = float(
-                datos["Close"].iloc[-2]
-            )
-
-            variacion = (
-                (precio - precio_anterior)
-                / precio_anterior
+                / precio_historico
             ) * 100
 
-
-            maximo = float(
-                datos["High"].max()
+            st.metric(
+                "Precio analizado",
+                f"${precio_analisis:,.2f}",
+                f"{diferencia_precio:+.2f}%"
             )
 
-            minimo = float(
-                datos["Low"].min()
-            )
+        else:
 
-
-            # =================================================
-            # MEDIAS
-            # =================================================
-
-            datos["MA20"] = (
-                datos["Close"]
-                .rolling(20)
-                .mean()
-            )
-
-            datos["MA50"] = (
-                datos["Close"]
-                .rolling(50)
-                .mean()
-            )
-
-            datos["MA200"] = (
-                datos["Close"]
-                .rolling(200)
-                .mean()
-            )
-
-
-            ma20 = datos["MA20"].iloc[-1]
-            ma50 = datos["MA50"].iloc[-1]
-            ma200 = datos["MA200"].iloc[-1]
-
-
-            # =================================================
-            # RSI
-            # =================================================
-
-            datos["RSI"] = calcular_rsi(
-                datos["Close"]
-            )
-
-            rsi = float(
-                datos["RSI"].iloc[-1]
-            )
-
-
-            # =================================================
-            # VOLATILIDAD
-            # =================================================
-
-            retornos = datos["Close"].pct_change()
-
-            volatilidad = (
-                retornos.std()
-                * np.sqrt(252)
-                * 100
-            )
-
-
-            # =================================================
-            # FUNDAMENTALES
-            # =================================================
-
-            nombre = fundamentales.get(
-                "longName",
-                ticker
-            )
-
-            sector = fundamentales.get(
-                "sector",
+            st.metric(
+                "Precio analizado",
                 "N/D"
             )
 
-            pe = fundamentales.get(
-                "trailingPE"
+
+    with col3:
+
+        st.metric(
+            "Máximo del periodo",
+            f"${maximo:,.2f}"
+        )
+
+
+    with col4:
+
+        st.metric(
+            "Mínimo del periodo",
+            f"${minimo:,.2f}"
+        )
+
+
+    # =====================================================
+    # MARKET AI SCORE
+    # =====================================================
+
+    st.divider()
+
+    st.header(
+        "🎯 MARKET AI SCORE"
+    )
+
+
+    if score_total >= 85:
+
+        estado = (
+            "🟢 OPORTUNIDAD MUY INTERESANTE"
+        )
+
+    elif score_total >= 70:
+
+        estado = (
+            "🟢 OPORTUNIDAD INTERESANTE"
+        )
+
+    elif score_total >= 55:
+
+        estado = (
+            "🟡 NEUTRAL"
+        )
+
+    elif score_total >= 40:
+
+        estado = (
+            "🟠 RIESGO ELEVADO"
+        )
+
+    else:
+
+        estado = (
+            "🔴 POCO ATRACTIVA"
+        )
+
+
+    col1, col2 = st.columns(2)
+
+
+    with col1:
+
+        st.metric(
+            "Puntuación",
+            f"{score_total}/100"
+        )
+
+
+    with col2:
+
+        st.subheader(
+            estado
+        )
+
+
+    st.progress(
+        score_total / 100
+    )
+
+
+    # =====================================================
+    # DESGLOSE
+    # =====================================================
+
+    st.subheader(
+        "📊 Desglose de la puntuación"
+    )
+
+
+    col1, col2, col3, col4, col5 = st.columns(5)
+
+
+    with col1:
+
+        st.metric(
+            "📈 Técnica",
+            f"{score_tecnico}/25"
+        )
+
+
+    with col2:
+
+        st.metric(
+            "💰 Valoración",
+            f"{score_valoracion}/25"
+        )
+
+
+    with col3:
+
+        st.metric(
+            "📊 Fundamentales",
+            f"{score_fundamentales}/25"
+        )
+
+
+    with col4:
+
+        st.metric(
+            "🚀 Crecimiento",
+            f"{score_crecimiento}/15"
+        )
+
+
+    with col5:
+
+        st.metric(
+            "⚠️ Riesgo",
+            f"{score_riesgo}/10"
+        )
+
+
+    # =====================================================
+    # DIAGNÓSTICO
+    # =====================================================
+
+    st.divider()
+
+    st.header(
+        "🧠 Diagnóstico de MARKET AI"
+    )
+
+
+    if score_total >= 70:
+
+        st.write(
+            f"**{ticker} presenta actualmente "
+            f"una configuración relativamente favorable**, "
+            f"con una puntuación de "
+            f"**{score_total}/100**."
+        )
+
+    elif score_total >= 55:
+
+        st.write(
+            f"**{ticker} presenta una situación mixta**, "
+            f"con una puntuación de "
+            f"**{score_total}/100**."
+        )
+
+    else:
+
+        st.write(
+            f"**{ticker} presenta actualmente "
+            f"varias señales desfavorables**, "
+            f"con una puntuación de "
+            f"**{score_total}/100**."
+        )
+
+
+    st.write(
+        f"**Tendencia técnica:** {tendencia}"
+    )
+
+
+    # =====================================================
+    # RAZONES
+    # =====================================================
+
+    st.subheader(
+        "🔎 ¿Por qué obtiene esta puntuación?"
+    )
+
+
+    todas_las_razones = (
+        razones_tecnico
+        + razones_valoracion
+        + razones_fundamentales
+        + razones_crecimiento
+        + razones_riesgo
+    )
+
+
+    for razon in todas_las_razones:
+
+        st.write(
+            f"• {razon}"
+        )
+
+
+    # =====================================================
+    # FUNDAMENTALES
+    # =====================================================
+
+    st.divider()
+
+    st.header(
+        "📊 Fundamentales"
+    )
+
+
+    col1, col2, col3, col4 = st.columns(4)
+
+
+    with col1:
+
+        st.metric(
+            "PER",
+            (
+                f"{pe:.2f}"
+                if pe is not None
+                else "N/D"
+            )
+        )
+
+
+    with col2:
+
+        st.metric(
+            "PER futuro",
+            (
+                f"{forward_pe:.2f}"
+                if forward_pe is not None
+                else "N/D"
+            )
+        )
+
+
+    with col3:
+
+        st.metric(
+            "PEG",
+            (
+                f"{peg:.2f}"
+                if peg is not None
+                else "N/D"
+            )
+        )
+
+
+    with col4:
+
+        st.metric(
+            "Precio/Valor contable",
+            (
+                f"{price_to_book:.2f}"
+                if price_to_book is not None
+                else "N/D"
+            )
+        )
+
+
+    col1, col2, col3, col4 = st.columns(4)
+
+
+    with col1:
+
+        st.metric(
+            "ROE",
+            (
+                f"{roe * 100:.2f}%"
+                if roe is not None
+                else "N/D"
+            )
+        )
+
+
+    with col2:
+
+        st.metric(
+            "Margen",
+            (
+                f"{margen * 100:.2f}%"
+                if margen is not None
+                else "N/D"
+            )
+        )
+
+
+    with col3:
+
+        st.metric(
+            "Crecimiento ingresos",
+            (
+                f"{crecimiento_ingresos * 100:.2f}%"
+                if crecimiento_ingresos is not None
+                else "N/D"
+            )
+        )
+
+
+    with col4:
+
+        st.metric(
+            "Crecimiento beneficios",
+            (
+                f"{crecimiento_beneficios * 100:.2f}%"
+                if crecimiento_beneficios is not None
+                else "N/D"
+            )
+        )
+
+
+    # =====================================================
+    # PRECIO OBJETIVO DE ANALISTAS
+    # =====================================================
+
+    st.divider()
+
+    st.header(
+        "🎯 Precio objetivo de analistas"
+    )
+
+
+    if target_price is not None:
+
+        precio_referencia = (
+            precio_analisis
+            if precio_analisis is not None
+            else precio_historico
+        )
+
+        potencial = (
+            (
+                target_price
+                - precio_referencia
+            )
+            / precio_referencia
+        ) * 100
+
+
+        col1, col2 = st.columns(2)
+
+
+        with col1:
+
+            st.metric(
+                "Objetivo medio",
+                f"${target_price:,.2f}"
             )
 
-            forward_pe = fundamentales.get(
-                "forwardPE"
+
+        with col2:
+
+            st.metric(
+                "Potencial",
+                f"{potencial:+.2f}%"
             )
 
-            peg = fundamentales.get(
-                "pegRatio"
+    else:
+
+        st.info(
+            "El precio objetivo de analistas "
+            "no está disponible."
+        )
+
+
+    # =====================================================
+    # GRÁFICO
+    # =====================================================
+
+    st.divider()
+
+    st.header(
+        "📈 Gráfico"
+    )
+
+
+    figura = go.Figure()
+
+
+    figura.add_trace(
+        go.Candlestick(
+            x=datos.index,
+            open=datos["Open"],
+            high=datos["High"],
+            low=datos["Low"],
+            close=datos["Close"],
+            name=ticker
+        )
+    )
+
+
+    figura.add_trace(
+        go.Scatter(
+            x=datos.index,
+            y=datos["MA20"],
+            name="MA20"
+        )
+    )
+
+
+    figura.add_trace(
+        go.Scatter(
+            x=datos.index,
+            y=datos["MA50"],
+            name="MA50"
+        )
+    )
+
+
+    figura.add_trace(
+        go.Scatter(
+            x=datos.index,
+            y=datos["MA200"],
+            name="MA200"
+        )
+    )
+
+
+    figura.update_layout(
+        xaxis_rangeslider_visible=False,
+        height=600
+    )
+
+
+    st.plotly_chart(
+        figura,
+        use_container_width=True
+    )
+
+
+    # =====================================================
+    # RSI
+    # =====================================================
+
+    st.divider()
+
+    st.header(
+        "📉 RSI"
+    )
+
+
+    figura_rsi = go.Figure()
+
+
+    figura_rsi.add_trace(
+        go.Scatter(
+            x=datos.index,
+            y=datos["RSI"],
+            name="RSI"
+        )
+    )
+
+
+    figura_rsi.add_hline(
+        y=70,
+        line_dash="dash"
+    )
+
+
+    figura_rsi.add_hline(
+        y=30,
+        line_dash="dash"
+    )
+
+
+    figura_rsi.update_layout(
+        height=350,
+        yaxis_title="RSI"
+    )
+
+
+    st.plotly_chart(
+        figura_rsi,
+        use_container_width=True
+    )
+
+
+    # =====================================================
+    # VOLATILIDAD
+    # =====================================================
+
+    st.divider()
+
+    st.header(
+        "⚠️ Riesgo y volatilidad"
+    )
+
+
+    st.metric(
+        "Volatilidad anualizada",
+        f"{volatilidad:.2f}%"
+    )
+
+
+    # =====================================================
+    # PRECIO PERSONALIZADO
+    # =====================================================
+
+    if (
+        tipo_precio == "Precio personalizado"
+        and precio_personalizado is not None
+        and precio_mercado is not None
+    ):
+
+        st.divider()
+
+        st.header(
+            "🎯 Análisis del precio personalizado"
+        )
+
+
+        diferencia = (
+            (
+                precio_personalizado
+                - precio_mercado
             )
-
-            price_to_book = fundamentales.get(
-                "priceToBook"
-            )
-
-            roe = fundamentales.get(
-                "returnOnEquity"
-            )
-
-            margen = fundamentales.get(
-                "profitMargins"
-            )
-
-            deuda = fundamentales.get(
-                "debtToEquity"
-            )
-
-            flujo_caja = fundamentales.get(
-                "freeCashflow"
-            )
-
-            crecimiento_ingresos = fundamentales.get(
-                "revenueGrowth"
-            )
-
-            crecimiento_beneficios = fundamentales.get(
-                "earningsGrowth"
-            )
-
-            target_price = fundamentales.get(
-                "targetMeanPrice"
-            )
+            / precio_mercado
+        ) * 100
 
 
-            # =================================================
-            # SCORES
-            # =================================================
-
-            score_tecnico, razones_tecnico = (
-                calcular_score_tecnico(
-                    precio,
-                    ma20,
-                    ma50,
-                    ma200,
-                    rsi
-                )
-            )
+        st.write(
+            f"Has indicado un precio de entrada de "
+            f"**${precio_personalizado:,.2f}**."
+        )
 
 
-            score_valoracion, razones_valoracion = (
-                calcular_score_valoracion(
-                    pe,
-                    forward_pe,
-                    peg,
-                    price_to_book
-                )
-            )
+        st.write(
+            f"El precio de mercado obtenido es "
+            f"**${precio_mercado:,.2f}**."
+        )
 
 
-            score_fundamentales, razones_fundamentales = (
-                calcular_score_fundamentales(
-                    roe,
-                    margen,
-                    deuda,
-                    flujo_caja
-                )
-            )
-
-
-            score_crecimiento, razones_crecimiento = (
-                calcular_score_crecimiento(
-                    crecimiento_ingresos,
-                    crecimiento_beneficios
-                )
-            )
-
-
-            score_riesgo, razones_riesgo = (
-                calcular_score_riesgo(
-                    volatilidad,
-                    deuda
-                )
-            )
-
-
-            score_total = (
-                score_tecnico
-                + score_valoracion
-                + score_fundamentales
-                + score_crecimiento
-                + score_riesgo
-            )
-
-
-            # =================================================
-            # TENDENCIA
-            # =================================================
-
-            if score_tecnico >= 20:
-
-                tendencia = "🟢 FUERTE"
-
-            elif score_tecnico >= 13:
-
-                tendencia = "🟡 MODERADA"
-
-            else:
-
-                tendencia = "🔴 DÉBIL"
-
-
-            # =================================================
-            # RESULTADO
-            # =================================================
+        if precio_personalizado < precio_mercado:
 
             st.success(
-                f"Análisis completado: {nombre}"
+                f"El precio personalizado está "
+                f"{abs(diferencia):.2f}% por debajo "
+                f"del precio actual."
             )
 
-            st.write(
-                f"**Sector:** {sector}"
-            )
-
-
-            # =================================================
-            # SCORE PRINCIPAL
-            # =================================================
-
-            st.divider()
-
-            st.header(
-                "🎯 MARKET AI SCORE"
-            )
-
-
-            if score_total >= 85:
-
-                estado = (
-                    "🟢 OPORTUNIDAD MUY INTERESANTE"
-                )
-
-            elif score_total >= 70:
-
-                estado = (
-                    "🟢 OPORTUNIDAD INTERESANTE"
-                )
-
-            elif score_total >= 55:
-
-                estado = (
-                    "🟡 NEUTRAL"
-                )
-
-            elif score_total >= 40:
-
-                estado = (
-                    "🟠 RIESGO ELEVADO"
-                )
-
-            else:
-
-                estado = (
-                    "🔴 POCO ATRACTIVA"
-                )
-
-
-            col1, col2 = st.columns(2)
-
-
-            with col1:
-
-                st.metric(
-                    "Puntuación",
-                    f"{score_total}/100"
-                )
-
-
-            with col2:
-
-                st.subheader(
-                    estado
-                )
-
-
-            st.progress(
-                score_total / 100
-            )
-
-
-            # =================================================
-            # DESGLOSE
-            # =================================================
-
-            st.subheader(
-                "📊 Desglose de la puntuación"
-            )
-
-
-            col1, col2, col3, col4, col5 = st.columns(5)
-
-
-            with col1:
-
-                st.metric(
-                    "📈 Técnica",
-                    f"{score_tecnico}/25"
-                )
-
-
-            with col2:
-
-                st.metric(
-                    "💰 Valoración",
-                    f"{score_valoracion}/25"
-                )
-
-
-            with col3:
-
-                st.metric(
-                    "📊 Fundamentales",
-                    f"{score_fundamentales}/25"
-                )
-
-
-            with col4:
-
-                st.metric(
-                    "🚀 Crecimiento",
-                    f"{score_crecimiento}/15"
-                )
-
-
-            with col5:
-
-                st.metric(
-                    "⚠️ Riesgo",
-                    f"{score_riesgo}/10"
-                )
-
-
-            # =================================================
-            # DIAGNÓSTICO
-            # =================================================
-
-            st.divider()
-
-            st.header(
-                "🧠 Diagnóstico de MARKET AI"
-            )
-
-
-            if score_total >= 70:
-
-                st.write(
-                    f"**{ticker} presenta actualmente "
-                    f"una configuración relativamente "
-                    f"favorable**, con una puntuación de "
-                    f"**{score_total}/100**."
-                )
-
-            elif score_total >= 55:
-
-                st.write(
-                    f"**{ticker} presenta una situación "
-                    f"mixta**, con una puntuación de "
-                    f"**{score_total}/100**."
-                )
-
-            else:
-
-                st.write(
-                    f"**{ticker} presenta actualmente "
-                    f"varias señales desfavorables**, "
-                    f"con una puntuación de "
-                    f"**{score_total}/100**."
-                )
-
-
-            # =================================================
-            # RAZONES
-            # =================================================
-
-            st.subheader(
-                "🔎 ¿Por qué obtiene esta puntuación?"
-            )
-
-
-            todas_las_razones = (
-                razones_tecnico
-                + razones_valoracion
-                + razones_fundamentales
-                + razones_crecimiento
-                + razones_riesgo
-            )
-
-
-            for razon in todas_las_razones:
-
-                st.write(
-                    f"• {razon}"
-                )
-
-
-            # =================================================
-            # PRECIO OBJETIVO
-            # =================================================
-
-            st.divider()
-
-            st.header(
-                "🎯 Precio objetivo"
-            )
-
-
-            if target_price:
-
-                potencial = (
-                    (target_price - precio)
-                    / precio
-                ) * 100
-
-
-                col1, col2 = st.columns(2)
-
-
-                with col1:
-
-                    st.metric(
-                        "Objetivo medio",
-                        f"${target_price:,.2f}"
-                    )
-
-
-                with col2:
-
-                    st.metric(
-                        "Potencial",
-                        f"{potencial:+.2f}%"
-                    )
-
-            else:
-
-                st.info(
-                    "Precio objetivo no disponible."
-                )
-
-
-            # =================================================
-            # GRÁFICO
-            # =================================================
-
-            st.divider()
-
-            st.header(
-                "📈 Gráfico"
-            )
-
-
-            figura = go.Figure()
-
-
-            figura.add_trace(
-                go.Candlestick(
-                    x=datos.index,
-                    open=datos["Open"],
-                    high=datos["High"],
-                    low=datos["Low"],
-                    close=datos["Close"],
-                    name=ticker
-                )
-            )
-
-
-            figura.add_trace(
-                go.Scatter(
-                    x=datos.index,
-                    y=datos["MA20"],
-                    name="MA20"
-                )
-            )
-
-
-            figura.add_trace(
-                go.Scatter(
-                    x=datos.index,
-                    y=datos["MA50"],
-                    name="MA50"
-                )
-            )
-
-
-            figura.add_trace(
-                go.Scatter(
-                    x=datos.index,
-                    y=datos["MA200"],
-                    name="MA200"
-                )
-            )
-
-
-            figura.update_layout(
-                xaxis_rangeslider_visible=False,
-                height=600
-            )
-
-
-            st.plotly_chart(
-                figura,
-                use_container_width=True
-            )
-
+        elif precio_personalizado > precio_mercado:
 
             st.warning(
-                "⚠️ El MARKET AI SCORE es actualmente "
-                "un modelo experimental. No debe utilizarse "
-                "por sí solo para tomar decisiones de inversión."
+                f"El precio personalizado está "
+                f"{diferencia:.2f}% por encima "
+                f"del precio actual."
+            )
+
+        else:
+
+            st.info(
+                "El precio personalizado coincide "
+                "con el precio actual."
             )
 
 
-        except Exception as error:
+    # =====================================================
+    # AVISO
+    # =====================================================
 
-            st.error(
-                "No se ha podido completar el análisis."
-            )
+    st.divider()
 
-            st.caption(
-                f"Detalle técnico: {error}"
-            )
-
-
-# =========================================================
-# TOP 5
-# =========================================================
-
-st.divider()
-
-st.header(
-    "🏆 TOP 5 OPORTUNIDADES"
-)
-
-col1, col2, col3, col4, col5 = st.columns(5)
-
-
-with col1:
-    st.metric("🥇 #1", "—")
-
-with col2:
-    st.metric("🥈 #2", "—")
-
-with col3:
-    st.metric("🥉 #3", "—")
-
-with col4:
-    st.metric("4️⃣ #4", "—")
-
-with col5:
-    st.metric("5️⃣ #5", "—")
-
-
-st.divider()
-
-st.caption(
-    "MARKET AI — Proyecto experimental de análisis financiero."
-)
+    st.warning(
+        "⚠️ MARKET AI es actualmente un modelo "
+        "experimental. La puntuación y los datos "
+        "no constituyen asesoramiento financiero "
+        "y no deben utilizarse por sí solos para "
+        "tomar decisiones de inversión."
+    )
