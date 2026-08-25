@@ -628,42 +628,48 @@ if st.button("📊 Analizar mercado"):
         st.stop()
 
 
-    with st.spinner(
-        f"Analizando {ticker}..."
-    ):
-        # =================================================
-        # PRECIO ALPHA VANTAGE
-        # =================================================
+with st.spinner(
+    f"Analizando {ticker}..."
+):
 
-        precio_alpha, error_alpha = (
-            obtener_precio_alpha_vantage(ticker)
+    # =================================================
+    # PRECIO ALPHA VANTAGE
+    # =================================================
+
+    precio_alpha, error_alpha = (
+        obtener_precio_alpha_vantage(ticker)
+    )
+
+
+    # =================================================
+    # PRECIO DE MERCADO
+    # =================================================
+
+    if precio_alpha:
+
+        precio_mercado = precio_alpha["precio"]
+
+        fecha_precio = precio_alpha["fecha"]
+
+        st.info(
+            f"💵 Precio de mercado: "
+            f"${precio_mercado:,.2f}  |  "
+            f"Fuente: Alpha Vantage  |  "
+            f"Última sesión: {fecha_precio}"
         )
-        try:
-        # =================================================
-        # PRECIO DE MERCADO
-        # =================================================
 
-        if precio_alpha:
+    else:
 
-            precio_mercado = precio_alpha["precio"]
+        precio_mercado = None
 
-            fecha_precio = precio_alpha["fecha"]
+        st.warning(
+            f"No se pudo obtener el precio de "
+            f"Alpha Vantage: {error_alpha}"
+        )
 
-            st.info(
-                f"💵 Precio de mercado: "
-                f"${precio_mercado:,.2f}  |  "
-                f"Fuente: Alpha Vantage  |  "
-                f"Última sesión: {fecha_precio}"
-            )
 
-        else:
-
-            precio_mercado = None
-
-            st.warning(
-                f"No se pudo obtener el precio de "
-                f"Alpha Vantage: {error_alpha}"
-            )
+    try:
+           
             # =================================================
             # DATOS
             # =================================================
