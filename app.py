@@ -4,6 +4,7 @@ import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
 
+
 # =========================================================
 # CONFIGURACIÓN
 # =========================================================
@@ -21,7 +22,7 @@ st.divider()
 
 
 # =========================================================
-# FUNCIÓN: OBTENER DATOS DE PRECIOS
+# OBTENER PRECIOS
 # =========================================================
 
 @st.cache_data(ttl=900)
@@ -41,7 +42,7 @@ def obtener_precios(ticker, periodo):
 
 
 # =========================================================
-# FUNCIÓN: OBTENER FUNDAMENTALES
+# OBTENER FUNDAMENTALES
 # =========================================================
 
 @st.cache_data(ttl=3600)
@@ -51,9 +52,7 @@ def obtener_fundamentales(ticker):
 
         empresa = yf.Ticker(ticker)
 
-        datos = empresa.get_info()
-
-        return datos
+        return empresa.get_info()
 
     except Exception:
 
@@ -61,7 +60,7 @@ def obtener_fundamentales(ticker):
 
 
 # =========================================================
-# FUNCIÓN: CALCULAR RSI
+# RSI
 # =========================================================
 
 def calcular_rsi(precios, periodo=14):
@@ -78,40 +77,485 @@ def calcular_rsi(precios, periodo=14):
 
     rs = media_ganancias / media_perdidas
 
-    rsi = 100 - (100 / (1 + rs))
-
-    return rsi
+    return 100 - (100 / (1 + rs))
 
 
 # =========================================================
-# SELECCIÓN
+# SCORE TÉCNICO
+# =========================================================
+
+def calcular_score_tecnico(
+    precio,
+    ma20,
+    ma50,
+    ma200,
+    rsi
+):
+
+    score = 0
+    razones = []
+
+    # Precio vs MA20
+    if precio > ma20:
+
+        score += 5
+
+        razones.append(
+            "Precio por encima de MA20"
+        )
+
+    else:
+
+        razones.append(
+            "Precio por debajo de MA20"
+        )
+
+
+    # Precio vs MA50
+    if precio > ma50:
+
+        score += 5
+
+        razones.append(
+            "Precio por encima de MA50"
+        )
+
+    else:
+
+        razones.append(
+            "Precio por debajo de MA50"
+        )
+
+
+    # Precio vs MA200
+    if not pd.isna(ma200):
+
+        if precio > ma200:
+
+            score += 7
+
+            razones.append(
+                "Precio por encima de MA200"
+            )
+
+        else:
+
+            razones.append(
+                "Precio por debajo de MA200"
+            )
+
+    else:
+
+        score += 3
+
+
+    # RSI
+    if 40 <= rsi <= 65:
+
+        score += 8
+
+        razones.append(
+            "RSI en zona saludable"
+        )
+
+    elif 30 <= rsi < 40:
+
+        score += 6
+
+        razones.append(
+            "RSI bajo"
+        )
+
+    elif 65 < rsi < 70:
+
+        score += 5
+
+        razones.append(
+            "RSI elevado"
+        )
+
+    elif rsi <= 30:
+
+        score += 4
+
+        razones.append(
+            "RSI en sobreventa"
+        )
+
+    else:
+
+        razones.append(
+            "RSI en sobrecompra"
+        )
+
+
+    return min(score, 25), razones
+
+
+# =========================================================
+# SCORE VALORACIÓN
+# =========================================================
+
+def calcular_score_valoracion(
+    pe,
+    forward_pe,
+    peg,
+    price_to_book
+):
+
+    score = 0
+    razones = []
+
+
+    # PER
+    if pe is not None:
+
+        if 0 < pe < 15:
+
+            score += 8
+
+            razones.append(
+                "PER relativamente bajo"
+            )
+
+        elif 15 <= pe < 25:
+
+            score += 6
+
+            razones.append(
+                "PER moderado"
+            )
+
+        elif 25 <= pe < 35:
+
+            score += 3
+
+            razones.append(
+                "PER elevado"
+            )
+
+        elif pe >= 35:
+
+            razones.append(
+                "PER muy elevado"
+            )
+
+    else:
+
+        razones.append(
+            "PER no disponible"
+        )
+
+
+    # Forward PER
+    if forward_pe is not None:
+
+        if 0 < forward_pe < 15:
+
+            score += 7
+
+        elif 15 <= forward_pe < 25:
+
+            score += 5
+
+        elif 25 <= forward_pe < 35:
+
+            score += 3
+
+
+    # PEG
+    if peg is not None:
+
+        if 0 < peg < 1:
+
+            score += 6
+
+            razones.append(
+                "PEG atractivo"
+            )
+
+        elif 1 <= peg < 2:
+
+            score += 4
+
+            razones.append(
+                "PEG moderado"
+            )
+
+        elif peg >= 2:
+
+            score += 1
+
+            razones.append(
+                "PEG elevado"
+            )
+
+
+    # Price / Book
+    if price_to_book is not None:
+
+        if 0 < price_to_book < 3:
+
+            score += 4
+
+        elif price_to_book >= 6:
+
+            score += 1
+
+
+    return min(score, 25), razones
+
+
+# =========================================================
+# SCORE FUNDAMENTALES
+# =========================================================
+
+def calcular_score_fundamentales(
+    roe,
+    margen,
+    deuda,
+    flujo_caja
+):
+
+    score = 0
+    razones = []
+
+
+    # ROE
+    if roe is not None:
+
+        if roe >= 0.20:
+
+            score += 8
+
+            razones.append(
+                "ROE fuerte"
+            )
+
+        elif roe >= 0.10:
+
+            score += 5
+
+            razones.append(
+                "ROE aceptable"
+            )
+
+        elif roe < 0:
+
+            razones.append(
+                "ROE negativo"
+            )
+
+
+    # Margen
+    if margen is not None:
+
+        if margen >= 0.20:
+
+            score += 7
+
+            razones.append(
+                "Margen de beneficio fuerte"
+            )
+
+        elif margen >= 0.10:
+
+            score += 5
+
+            razones.append(
+                "Margen de beneficio saludable"
+            )
+
+        elif margen < 0:
+
+            razones.append(
+                "Margen negativo"
+            )
+
+
+    # Deuda
+    if deuda is not None:
+
+        if deuda < 50:
+
+            score += 6
+
+            razones.append(
+                "Nivel de deuda bajo"
+            )
+
+        elif deuda < 100:
+
+            score += 4
+
+        elif deuda > 200:
+
+            score += 1
+
+            razones.append(
+                "Nivel de deuda elevado"
+            )
+
+
+    # Flujo de caja
+    if flujo_caja is not None:
+
+        if flujo_caja > 0:
+
+            score += 4
+
+            razones.append(
+                "Flujo de caja libre positivo"
+            )
+
+
+    return min(score, 25), razones
+
+
+# =========================================================
+# SCORE CRECIMIENTO
+# =========================================================
+
+def calcular_score_crecimiento(
+    crecimiento_ingresos,
+    crecimiento_beneficios
+):
+
+    score = 0
+    razones = []
+
+
+    if crecimiento_ingresos is not None:
+
+        if crecimiento_ingresos >= 0.20:
+
+            score += 8
+
+            razones.append(
+                "Crecimiento de ingresos fuerte"
+            )
+
+        elif crecimiento_ingresos >= 0.10:
+
+            score += 6
+
+        elif crecimiento_ingresos > 0:
+
+            score += 3
+
+        else:
+
+            razones.append(
+                "Ingresos en decrecimiento"
+            )
+
+
+    if crecimiento_beneficios is not None:
+
+        if crecimiento_beneficios >= 0.20:
+
+            score += 7
+
+            razones.append(
+                "Crecimiento de beneficios fuerte"
+            )
+
+        elif crecimiento_beneficios >= 0.10:
+
+            score += 5
+
+        elif crecimiento_beneficios > 0:
+
+            score += 3
+
+        else:
+
+            razones.append(
+                "Beneficios en decrecimiento"
+            )
+
+
+    return min(score, 15), razones
+
+
+# =========================================================
+# SCORE RIESGO
+# =========================================================
+
+def calcular_score_riesgo(
+    volatilidad,
+    deuda
+):
+
+    score = 10
+    razones = []
+
+
+    # Volatilidad
+    if volatilidad > 50:
+
+        score -= 5
+
+        razones.append(
+            "Volatilidad muy elevada"
+        )
+
+    elif volatilidad > 30:
+
+        score -= 3
+
+        razones.append(
+            "Volatilidad elevada"
+        )
+
+    elif volatilidad > 20:
+
+        score -= 1
+
+
+    # Deuda
+    if deuda is not None:
+
+        if deuda > 200:
+
+            score -= 3
+
+        elif deuda > 100:
+
+            score -= 1
+
+
+    return max(score, 0), razones
+
+
+# =========================================================
+# ANALIZAR
 # =========================================================
 
 st.header("🔍 Analizar un activo")
 
+
 ticker = st.text_input(
-    "Introduce el símbolo del activo",
+    "Introduce el símbolo",
     value="AAPL",
-    placeholder="Ejemplo: AAPL, NVDA, MSFT, TSLA..."
+    placeholder="AAPL, NVDA, MSFT, TSLA..."
 ).upper().strip()
 
 
 periodo = st.selectbox(
-    "Periodo del gráfico",
+    "Periodo",
     ["3mo", "6mo", "1y", "2y", "5y"],
     index=2
 )
 
 
-# =========================================================
-# BOTÓN ANALIZAR
-# =========================================================
-
 if st.button("📊 Analizar mercado"):
 
     if not ticker:
 
-        st.warning("Introduce un símbolo.")
+        st.warning(
+            "Introduce un símbolo."
+        )
 
         st.stop()
 
@@ -123,7 +567,7 @@ if st.button("📊 Analizar mercado"):
         try:
 
             # =================================================
-            # PRECIOS
+            # DATOS
             # =================================================
 
             datos = obtener_precios(
@@ -131,18 +575,22 @@ if st.button("📊 Analizar mercado"):
                 periodo
             )
 
+            fundamentales = obtener_fundamentales(
+                ticker
+            )
+
 
             if datos.empty:
 
                 st.error(
-                    "No se han encontrado datos para este activo."
+                    "No se han encontrado datos."
                 )
 
                 st.stop()
 
 
             # =================================================
-            # PRECIOS BÁSICOS
+            # MERCADO
             # =================================================
 
             precio = float(
@@ -152,7 +600,6 @@ if st.button("📊 Analizar mercado"):
             precio_anterior = float(
                 datos["Close"].iloc[-2]
             )
-
 
             variacion = (
                 (precio - precio_anterior)
@@ -164,19 +611,13 @@ if st.button("📊 Analizar mercado"):
                 datos["High"].max()
             )
 
-
             minimo = float(
                 datos["Low"].min()
             )
 
 
-            volumen = float(
-                datos["Volume"].iloc[-1]
-            )
-
-
             # =================================================
-            # MEDIAS MÓVILES
+            # MEDIAS
             # =================================================
 
             datos["MA20"] = (
@@ -185,13 +626,11 @@ if st.button("📊 Analizar mercado"):
                 .mean()
             )
 
-
             datos["MA50"] = (
                 datos["Close"]
                 .rolling(50)
                 .mean()
             )
-
 
             datos["MA200"] = (
                 datos["Close"]
@@ -201,9 +640,7 @@ if st.button("📊 Analizar mercado"):
 
 
             ma20 = datos["MA20"].iloc[-1]
-
             ma50 = datos["MA50"].iloc[-1]
-
             ma200 = datos["MA200"].iloc[-1]
 
 
@@ -215,7 +652,6 @@ if st.button("📊 Analizar mercado"):
                 datos["Close"]
             )
 
-
             rsi = float(
                 datos["RSI"].iloc[-1]
             )
@@ -225,11 +661,7 @@ if st.button("📊 Analizar mercado"):
             # VOLATILIDAD
             # =================================================
 
-            retornos = (
-                datos["Close"]
-                .pct_change()
-            )
-
+            retornos = datos["Close"].pct_change()
 
             volatilidad = (
                 retornos.std()
@@ -239,135 +671,58 @@ if st.button("📊 Analizar mercado"):
 
 
             # =================================================
-            # TENDENCIA
-            # =================================================
-
-            puntos_tendencia = 0
-
-
-            if precio > ma20:
-
-                puntos_tendencia += 1
-
-
-            if precio > ma50:
-
-                puntos_tendencia += 1
-
-
-            if not pd.isna(ma200):
-
-                if precio > ma200:
-
-                    puntos_tendencia += 1
-
-
-            if puntos_tendencia >= 3:
-
-                tendencia = "🟢 ALCISTA"
-
-
-            elif puntos_tendencia == 2:
-
-                tendencia = "🟡 NEUTRAL-ALCISTA"
-
-
-            elif puntos_tendencia == 1:
-
-                tendencia = "🟠 NEUTRAL-BAJISTA"
-
-
-            else:
-
-                tendencia = "🔴 BAJISTA"
-
-
-            # =================================================
             # FUNDAMENTALES
             # =================================================
-
-            fundamentales = obtener_fundamentales(
-                ticker
-            )
-
 
             nombre = fundamentales.get(
                 "longName",
                 ticker
             )
 
-
             sector = fundamentales.get(
                 "sector",
-                "No disponible"
+                "N/D"
             )
-
-
-            industria = fundamentales.get(
-                "industry",
-                "No disponible"
-            )
-
-
-            market_cap = fundamentales.get(
-                "marketCap"
-            )
-
 
             pe = fundamentales.get(
                 "trailingPE"
             )
 
-
             forward_pe = fundamentales.get(
                 "forwardPE"
             )
-
 
             peg = fundamentales.get(
                 "pegRatio"
             )
 
-
             price_to_book = fundamentales.get(
                 "priceToBook"
             )
 
-
-            profit_margin = fundamentales.get(
-                "profitMargins"
-            )
-
-
-            operating_margin = fundamentales.get(
-                "operatingMargins"
-            )
-
-
-            revenue_growth = fundamentales.get(
-                "revenueGrowth"
-            )
-
-
-            earnings_growth = fundamentales.get(
-                "earningsGrowth"
-            )
-
-
-            debt_to_equity = fundamentales.get(
-                "debtToEquity"
-            )
-
-
-            return_on_equity = fundamentales.get(
+            roe = fundamentales.get(
                 "returnOnEquity"
             )
 
+            margen = fundamentales.get(
+                "profitMargins"
+            )
 
-            free_cash_flow = fundamentales.get(
+            deuda = fundamentales.get(
+                "debtToEquity"
+            )
+
+            flujo_caja = fundamentales.get(
                 "freeCashflow"
             )
 
+            crecimiento_ingresos = fundamentales.get(
+                "revenueGrowth"
+            )
+
+            crecimiento_beneficios = fundamentales.get(
+                "earningsGrowth"
+            )
 
             target_price = fundamentales.get(
                 "targetMeanPrice"
@@ -375,62 +730,316 @@ if st.button("📊 Analizar mercado"):
 
 
             # =================================================
-            # CABECERA
+            # SCORES
+            # =================================================
+
+            score_tecnico, razones_tecnico = (
+                calcular_score_tecnico(
+                    precio,
+                    ma20,
+                    ma50,
+                    ma200,
+                    rsi
+                )
+            )
+
+
+            score_valoracion, razones_valoracion = (
+                calcular_score_valoracion(
+                    pe,
+                    forward_pe,
+                    peg,
+                    price_to_book
+                )
+            )
+
+
+            score_fundamentales, razones_fundamentales = (
+                calcular_score_fundamentales(
+                    roe,
+                    margen,
+                    deuda,
+                    flujo_caja
+                )
+            )
+
+
+            score_crecimiento, razones_crecimiento = (
+                calcular_score_crecimiento(
+                    crecimiento_ingresos,
+                    crecimiento_beneficios
+                )
+            )
+
+
+            score_riesgo, razones_riesgo = (
+                calcular_score_riesgo(
+                    volatilidad,
+                    deuda
+                )
+            )
+
+
+            score_total = (
+                score_tecnico
+                + score_valoracion
+                + score_fundamentales
+                + score_crecimiento
+                + score_riesgo
+            )
+
+
+            # =================================================
+            # TENDENCIA
+            # =================================================
+
+            if score_tecnico >= 20:
+
+                tendencia = "🟢 FUERTE"
+
+            elif score_tecnico >= 13:
+
+                tendencia = "🟡 MODERADA"
+
+            else:
+
+                tendencia = "🔴 DÉBIL"
+
+
+            # =================================================
+            # RESULTADO
             # =================================================
 
             st.success(
                 f"Análisis completado: {nombre}"
             )
 
-
             st.write(
-                f"**Sector:** {sector}  |  "
-                f"**Industria:** {industria}"
+                f"**Sector:** {sector}"
             )
 
 
             # =================================================
-            # MERCADO
+            # SCORE PRINCIPAL
             # =================================================
 
             st.divider()
 
-            st.header("📊 Mercado")
+            st.header(
+                "🎯 MARKET AI SCORE"
+            )
 
 
-            col1, col2, col3, col4 = st.columns(4)
+            if score_total >= 85:
+
+                estado = (
+                    "🟢 OPORTUNIDAD MUY INTERESANTE"
+                )
+
+            elif score_total >= 70:
+
+                estado = (
+                    "🟢 OPORTUNIDAD INTERESANTE"
+                )
+
+            elif score_total >= 55:
+
+                estado = (
+                    "🟡 NEUTRAL"
+                )
+
+            elif score_total >= 40:
+
+                estado = (
+                    "🟠 RIESGO ELEVADO"
+                )
+
+            else:
+
+                estado = (
+                    "🔴 POCO ATRACTIVA"
+                )
+
+
+            col1, col2 = st.columns(2)
 
 
             with col1:
 
                 st.metric(
-                    "Precio",
-                    f"${precio:,.2f}",
-                    f"{variacion:+.2f}%"
+                    "Puntuación",
+                    f"{score_total}/100"
+                )
+
+
+            with col2:
+
+                st.subheader(
+                    estado
+                )
+
+
+            st.progress(
+                score_total / 100
+            )
+
+
+            # =================================================
+            # DESGLOSE
+            # =================================================
+
+            st.subheader(
+                "📊 Desglose de la puntuación"
+            )
+
+
+            col1, col2, col3, col4, col5 = st.columns(5)
+
+
+            with col1:
+
+                st.metric(
+                    "📈 Técnica",
+                    f"{score_tecnico}/25"
                 )
 
 
             with col2:
 
                 st.metric(
-                    "Máximo",
-                    f"${maximo:,.2f}"
+                    "💰 Valoración",
+                    f"{score_valoracion}/25"
                 )
 
 
             with col3:
 
                 st.metric(
-                    "Mínimo",
-                    f"${minimo:,.2f}"
+                    "📊 Fundamentales",
+                    f"{score_fundamentales}/25"
                 )
 
 
             with col4:
 
                 st.metric(
-                    "Volatilidad",
-                    f"{volatilidad:.2f}%"
+                    "🚀 Crecimiento",
+                    f"{score_crecimiento}/15"
+                )
+
+
+            with col5:
+
+                st.metric(
+                    "⚠️ Riesgo",
+                    f"{score_riesgo}/10"
+                )
+
+
+            # =================================================
+            # DIAGNÓSTICO
+            # =================================================
+
+            st.divider()
+
+            st.header(
+                "🧠 Diagnóstico de MARKET AI"
+            )
+
+
+            if score_total >= 70:
+
+                st.write(
+                    f"**{ticker} presenta actualmente "
+                    f"una configuración relativamente "
+                    f"favorable**, con una puntuación de "
+                    f"**{score_total}/100**."
+                )
+
+            elif score_total >= 55:
+
+                st.write(
+                    f"**{ticker} presenta una situación "
+                    f"mixta**, con una puntuación de "
+                    f"**{score_total}/100**."
+                )
+
+            else:
+
+                st.write(
+                    f"**{ticker} presenta actualmente "
+                    f"varias señales desfavorables**, "
+                    f"con una puntuación de "
+                    f"**{score_total}/100**."
+                )
+
+
+            # =================================================
+            # RAZONES
+            # =================================================
+
+            st.subheader(
+                "🔎 ¿Por qué obtiene esta puntuación?"
+            )
+
+
+            todas_las_razones = (
+                razones_tecnico
+                + razones_valoracion
+                + razones_fundamentales
+                + razones_crecimiento
+                + razones_riesgo
+            )
+
+
+            for razon in todas_las_razones:
+
+                st.write(
+                    f"• {razon}"
+                )
+
+
+            # =================================================
+            # PRECIO OBJETIVO
+            # =================================================
+
+            st.divider()
+
+            st.header(
+                "🎯 Precio objetivo"
+            )
+
+
+            if target_price:
+
+                potencial = (
+                    (target_price - precio)
+                    / precio
+                ) * 100
+
+
+                col1, col2 = st.columns(2)
+
+
+                with col1:
+
+                    st.metric(
+                        "Objetivo medio",
+                        f"${target_price:,.2f}"
+                    )
+
+
+                with col2:
+
+                    st.metric(
+                        "Potencial",
+                        f"{potencial:+.2f}%"
+                    )
+
+            else:
+
+                st.info(
+                    "Precio objetivo no disponible."
                 )
 
 
@@ -440,7 +1049,9 @@ if st.button("📊 Analizar mercado"):
 
             st.divider()
 
-            st.header("📈 Análisis técnico")
+            st.header(
+                "📈 Gráfico"
+            )
 
 
             figura = go.Figure()
@@ -462,7 +1073,7 @@ if st.button("📊 Analizar mercado"):
                 go.Scatter(
                     x=datos.index,
                     y=datos["MA20"],
-                    name="Media 20"
+                    name="MA20"
                 )
             )
 
@@ -471,7 +1082,7 @@ if st.button("📊 Analizar mercado"):
                 go.Scatter(
                     x=datos.index,
                     y=datos["MA50"],
-                    name="Media 50"
+                    name="MA50"
                 )
             )
 
@@ -480,14 +1091,12 @@ if st.button("📊 Analizar mercado"):
                 go.Scatter(
                     x=datos.index,
                     y=datos["MA200"],
-                    name="Media 200"
+                    name="MA200"
                 )
             )
 
 
             figura.update_layout(
-                xaxis_title="Fecha",
-                yaxis_title="Precio",
                 xaxis_rangeslider_visible=False,
                 height=600
             )
@@ -499,439 +1108,10 @@ if st.button("📊 Analizar mercado"):
             )
 
 
-            # =================================================
-            # INDICADORES
-            # =================================================
-
-            st.subheader(
-                "🧠 Indicadores técnicos"
-            )
-
-
-            col1, col2, col3 = st.columns(3)
-
-
-            with col1:
-
-                st.metric(
-                    "Tendencia",
-                    tendencia
-                )
-
-
-            with col2:
-
-                st.metric(
-                    "RSI",
-                    f"{rsi:.2f}"
-                )
-
-
-            with col3:
-
-                st.metric(
-                    "Volatilidad",
-                    f"{volatilidad:.2f}%"
-                )
-
-
-            if rsi >= 70:
-
-                st.warning(
-                    "RSI elevado: posible zona de sobrecompra."
-                )
-
-
-            elif rsi <= 30:
-
-                st.success(
-                    "RSI bajo: posible zona de sobreventa."
-                )
-
-
-            else:
-
-                st.info(
-                    "RSI en zona intermedia."
-                )
-
-
-            # =================================================
-            # FUNDAMENTALES
-            # =================================================
-
-            st.divider()
-
-            st.header("💰 Fundamentales")
-
-
-            col1, col2, col3, col4 = st.columns(4)
-
-
-            with col1:
-
-                if market_cap:
-
-                    st.metric(
-                        "Capitalización",
-                        f"${market_cap / 1e9:.2f} B"
-                    )
-
-                else:
-
-                    st.metric(
-                        "Capitalización",
-                        "N/D"
-                    )
-
-
-            with col2:
-
-                if pe:
-
-                    st.metric(
-                        "PER",
-                        f"{pe:.2f}"
-                    )
-
-                else:
-
-                    st.metric(
-                        "PER",
-                        "N/D"
-                    )
-
-
-            with col3:
-
-                if forward_pe:
-
-                    st.metric(
-                        "PER futuro",
-                        f"{forward_pe:.2f}"
-                    )
-
-                else:
-
-                    st.metric(
-                        "PER futuro",
-                        "N/D"
-                    )
-
-
-            with col4:
-
-                if price_to_book:
-
-                    st.metric(
-                        "Precio/Valor contable",
-                        f"{price_to_book:.2f}"
-                    )
-
-                else:
-
-                    st.metric(
-                        "Precio/Valor contable",
-                        "N/D"
-                    )
-
-
-            # =================================================
-            # CRECIMIENTO Y RENTABILIDAD
-            # =================================================
-
-            st.subheader(
-                "📋 Crecimiento y rentabilidad"
-            )
-
-
-            col1, col2, col3, col4 = st.columns(4)
-
-
-            with col1:
-
-                if revenue_growth is not None:
-
-                    st.metric(
-                        "Crecimiento ingresos",
-                        f"{revenue_growth * 100:.2f}%"
-                    )
-
-                else:
-
-                    st.metric(
-                        "Crecimiento ingresos",
-                        "N/D"
-                    )
-
-
-            with col2:
-
-                if earnings_growth is not None:
-
-                    st.metric(
-                        "Crecimiento beneficios",
-                        f"{earnings_growth * 100:.2f}%"
-                    )
-
-                else:
-
-                    st.metric(
-                        "Crecimiento beneficios",
-                        "N/D"
-                    )
-
-
-            with col3:
-
-                if profit_margin is not None:
-
-                    st.metric(
-                        "Margen beneficio",
-                        f"{profit_margin * 100:.2f}%"
-                    )
-
-                else:
-
-                    st.metric(
-                        "Margen beneficio",
-                        "N/D"
-                    )
-
-
-            with col4:
-
-                if return_on_equity is not None:
-
-                    st.metric(
-                        "ROE",
-                        f"{return_on_equity * 100:.2f}%"
-                    )
-
-                else:
-
-                    st.metric(
-                        "ROE",
-                        "N/D"
-                    )
-
-
-            # =================================================
-            # DEUDA Y FLUJO DE CAJA
-            # =================================================
-
-            st.subheader(
-                "🏦 Deuda y flujo de caja"
-            )
-
-
-            col1, col2, col3 = st.columns(3)
-
-
-            with col1:
-
-                if debt_to_equity is not None:
-
-                    st.metric(
-                        "Deuda / Capital",
-                        f"{debt_to_equity:.2f}"
-                    )
-
-                else:
-
-                    st.metric(
-                        "Deuda / Capital",
-                        "N/D"
-                    )
-
-
-            with col2:
-
-                if operating_margin is not None:
-
-                    st.metric(
-                        "Margen operativo",
-                        f"{operating_margin * 100:.2f}%"
-                    )
-
-                else:
-
-                    st.metric(
-                        "Margen operativo",
-                        "N/D"
-                    )
-
-
-            with col3:
-
-                if free_cash_flow is not None:
-
-                    st.metric(
-                        "Flujo de caja libre",
-                        f"${free_cash_flow / 1e9:.2f} B"
-                    )
-
-                else:
-
-                    st.metric(
-                        "Flujo de caja libre",
-                        "N/D"
-                    )
-
-
-            # =================================================
-            # PRECIO OBJETIVO
-            # =================================================
-
-            st.divider()
-
-            st.header("🎯 Precio objetivo")
-
-
-            if target_price:
-
-                diferencia_objetivo = (
-                    (target_price - precio)
-                    / precio
-                ) * 100
-
-
-                col1, col2 = st.columns(2)
-
-
-                with col1:
-
-                    st.metric(
-                        "Objetivo medio analistas",
-                        f"${target_price:,.2f}"
-                    )
-
-
-                with col2:
-
-                    st.metric(
-                        "Potencial",
-                        f"{diferencia_objetivo:+.2f}%"
-                    )
-
-
-            else:
-
-                st.info(
-                    "No hay precio objetivo disponible."
-                )
-
-
-            # =================================================
-            # VALORACIÓN PRELIMINAR
-            # =================================================
-
-            st.divider()
-
-            st.header(
-                "🔎 Valoración preliminar"
-            )
-
-
-            positivas = 0
-            negativas = 0
-
-
-            if pe:
-
-                if pe < 20:
-
-                    positivas += 1
-
-                elif pe > 35:
-
-                    negativas += 1
-
-
-            if earnings_growth is not None:
-
-                if earnings_growth > 0.10:
-
-                    positivas += 1
-
-                elif earnings_growth < 0:
-
-                    negativas += 1
-
-
-            if return_on_equity is not None:
-
-                if return_on_equity > 0.15:
-
-                    positivas += 1
-
-                elif return_on_equity < 0:
-
-                    negativas += 1
-
-
-            if debt_to_equity is not None:
-
-                if debt_to_equity < 100:
-
-                    positivas += 1
-
-                elif debt_to_equity > 200:
-
-                    negativas += 1
-
-
-            if target_price:
-
-                if target_price > precio * 1.10:
-
-                    positivas += 1
-
-                elif target_price < precio * 0.90:
-
-                    negativas += 1
-
-
-            if positivas > negativas:
-
-                valoracion = (
-                    "🟢 FUNDAMENTALES FAVORABLES"
-                )
-
-
-            elif negativas > positivas:
-
-                valoracion = (
-                    "🔴 FUNDAMENTALES DESFAVORABLES"
-                )
-
-
-            else:
-
-                valoracion = (
-                    "🟡 FUNDAMENTALES MIXTOS"
-                )
-
-
-            st.subheader(
-                valoracion
-            )
-
-
-            st.write(
-                f"Señales positivas: **{positivas}**"
-            )
-
-
-            st.write(
-                f"Señales negativas: **{negativas}**"
-            )
-
-
             st.warning(
-                "⚠️ Esta valoración es experimental "
-                "y todavía no constituye una recomendación "
-                "de inversión."
+                "⚠️ El MARKET AI SCORE es actualmente "
+                "un modelo experimental. No debe utilizarse "
+                "por sí solo para tomar decisiones de inversión."
             )
 
 
@@ -956,52 +1136,26 @@ st.header(
     "🏆 TOP 5 OPORTUNIDADES"
 )
 
-
 col1, col2, col3, col4, col5 = st.columns(5)
 
 
 with col1:
-
-    st.metric(
-        "🥇 #1",
-        "—"
-    )
-
+    st.metric("🥇 #1", "—")
 
 with col2:
-
-    st.metric(
-        "🥈 #2",
-        "—"
-    )
-
+    st.metric("🥈 #2", "—")
 
 with col3:
-
-    st.metric(
-        "🥉 #3",
-        "—"
-    )
-
+    st.metric("🥉 #3", "—")
 
 with col4:
-
-    st.metric(
-        "4️⃣ #4",
-        "—"
-    )
-
+    st.metric("4️⃣ #4", "—")
 
 with col5:
-
-    st.metric(
-        "5️⃣ #5",
-        "—"
-    )
+    st.metric("5️⃣ #5", "—")
 
 
 st.divider()
-
 
 st.caption(
     "MARKET AI — Proyecto experimental de análisis financiero."
