@@ -5,6 +5,10 @@ import numpy as np
 import plotly.graph_objects as go
 import requests
 
+from dcf import (
+    calcular_escenarios_dcf,
+    diagnosticar_valoracion
+)
 
 # =========================================================
 # CONFIGURACIÓN
