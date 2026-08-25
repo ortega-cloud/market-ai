@@ -31,329 +31,635 @@ periodo = st.selectbox(
 
 if st.button("📊 Analizar mercado"):
 
-    with st.spinner("Analizando el mercado..."):
+    with st.spinner("Analizando mercado y fundamentales..."):
 
         try:
 
             activo = yf.Ticker(ticker)
+
             datos = activo.history(period=periodo)
 
-            if datos.empty:
+            info = activo.info
 
+            if datos.empty:
                 st.error(
                     "No se han encontrado datos para este activo."
+                )
+                st.stop()
+
+            # ==========================================
+            # DATOS DE MERCADO
+            # ==========================================
+
+            precio = datos["Close"].iloc[-1]
+            precio_anterior = datos["Close"].iloc[-2]
+
+            variacion = (
+                (precio - precio_anterior)
+                / precio_anterior
+            ) * 100
+
+            maximo = datos["High"].max()
+            minimo = datos["Low"].min()
+
+            volumen = datos["Volume"].iloc[-1]
+
+            # ==========================================
+            # MEDIAS MÓVILES
+            # ==========================================
+
+            datos["MA20"] = datos["Close"].rolling(20).mean()
+            datos["MA50"] = datos["Close"].rolling(50).mean()
+            datos["MA200"] = datos["Close"].rolling(200).mean()
+
+            ma20 = datos["MA20"].iloc[-1]
+            ma50 = datos["MA50"].iloc[-1]
+            ma200 = datos["MA200"].iloc[-1]
+
+            # ==========================================
+            # RSI
+            # ==========================================
+
+            diferencia = datos["Close"].diff()
+
+            ganancias = diferencia.where(
+                diferencia > 0, 0
+            )
+
+            perdidas = -diferencia.where(
+                diferencia < 0, 0
+            )
+
+            media_ganancias = ganancias.rolling(14).mean()
+            media_perdidas = perdidas.rolling(14).mean()
+
+            rs = (
+                media_ganancias /
+                media_perdidas
+            )
+
+            datos["RSI"] = 100 - (
+                100 / (1 + rs)
+            )
+
+            rsi = datos["RSI"].iloc[-1]
+
+            # ==========================================
+            # VOLATILIDAD
+            # ==========================================
+
+            retornos = datos["Close"].pct_change()
+
+            volatilidad = (
+                retornos.std()
+                * np.sqrt(252)
+                * 100
+            )
+
+            # ==========================================
+            # TENDENCIA
+            # ==========================================
+
+            puntos_tendencia = 0
+
+            if precio > ma20:
+                puntos_tendencia += 1
+
+            if precio > ma50:
+                puntos_tendencia += 1
+
+            if not pd.isna(ma200):
+
+                if precio > ma200:
+                    puntos_tendencia += 1
+
+            if puntos_tendencia >= 3:
+                tendencia = "🟢 ALCISTA"
+
+            elif puntos_tendencia == 2:
+                tendencia = "🟡 NEUTRAL-ALCISTA"
+
+            elif puntos_tendencia == 1:
+                tendencia = "🟠 NEUTRAL-BAJISTA"
+
+            else:
+                tendencia = "🔴 BAJISTA"
+
+            # ==========================================
+            # FUNDAMENTALES
+            # ==========================================
+
+            nombre = info.get(
+                "longName",
+                ticker
+            )
+
+            sector = info.get(
+                "sector",
+                "No disponible"
+            )
+
+            industria = info.get(
+                "industry",
+                "No disponible"
+            )
+
+            market_cap = info.get(
+                "marketCap"
+            )
+
+            pe = info.get(
+                "trailingPE"
+            )
+
+            forward_pe = info.get(
+                "forwardPE"
+            )
+
+            peg = info.get(
+                "pegRatio"
+            )
+
+            price_to_book = info.get(
+                "priceToBook"
+            )
+
+            profit_margin = info.get(
+                "profitMargins"
+            )
+
+            operating_margin = info.get(
+                "operatingMargins"
+            )
+
+            revenue_growth = info.get(
+                "revenueGrowth"
+            )
+
+            earnings_growth = info.get(
+                "earningsGrowth"
+            )
+
+            debt_to_equity = info.get(
+                "debtToEquity"
+            )
+
+            return_on_equity = info.get(
+                "returnOnEquity"
+            )
+
+            free_cash_flow = info.get(
+                "freeCashflow"
+            )
+
+            target_price = info.get(
+                "targetMeanPrice"
+            )
+
+            # ==========================================
+            # CABECERA
+            # ==========================================
+
+            st.success(
+                f"Análisis completado: {nombre}"
+            )
+
+            st.write(
+                f"**Sector:** {sector}  |  "
+                f"**Industria:** {industria}"
+            )
+
+            # ==========================================
+            # MERCADO
+            # ==========================================
+
+            st.divider()
+
+            st.header("📊 Mercado")
+
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                st.metric(
+                    "Precio",
+                    f"${precio:,.2f}",
+                    f"{variacion:+.2f}%"
+                )
+
+            with col2:
+                st.metric(
+                    "Máximo periodo",
+                    f"${maximo:,.2f}"
+                )
+
+            with col3:
+                st.metric(
+                    "Mínimo periodo",
+                    f"${minimo:,.2f}"
+                )
+
+            with col4:
+                st.metric(
+                    "Volatilidad",
+                    f"{volatilidad:.2f}%"
+                )
+
+            # ==========================================
+            # GRÁFICO
+            # ==========================================
+
+            st.divider()
+
+            st.header("📈 Análisis técnico")
+
+            figura = go.Figure()
+
+            figura.add_trace(
+                go.Candlestick(
+                    x=datos.index,
+                    open=datos["Open"],
+                    high=datos["High"],
+                    low=datos["Low"],
+                    close=datos["Close"],
+                    name=ticker
+                )
+            )
+
+            figura.add_trace(
+                go.Scatter(
+                    x=datos.index,
+                    y=datos["MA20"],
+                    name="Media 20"
+                )
+            )
+
+            figura.add_trace(
+                go.Scatter(
+                    x=datos.index,
+                    y=datos["MA50"],
+                    name="Media 50"
+                )
+            )
+
+            figura.add_trace(
+                go.Scatter(
+                    x=datos.index,
+                    y=datos["MA200"],
+                    name="Media 200"
+                )
+            )
+
+            figura.update_layout(
+                xaxis_title="Fecha",
+                yaxis_title="Precio",
+                xaxis_rangeslider_visible=False,
+                height=600
+            )
+
+            st.plotly_chart(
+                figura,
+                use_container_width=True
+            )
+
+            # ==========================================
+            # INDICADORES
+            # ==========================================
+
+            st.subheader("🧠 Indicadores")
+
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+                st.metric(
+                    "Tendencia",
+                    tendencia
+                )
+
+            with col2:
+                st.metric(
+                    "RSI",
+                    f"{rsi:.2f}"
+                )
+
+            with col3:
+                st.metric(
+                    "Volatilidad",
+                    f"{volatilidad:.2f}%"
+                )
+
+            if rsi >= 70:
+
+                st.warning(
+                    "El RSI está elevado. "
+                    "El activo podría encontrarse "
+                    "en una zona de sobrecompra."
+                )
+
+            elif rsi <= 30:
+
+                st.success(
+                    "El RSI está bajo. "
+                    "El activo podría encontrarse "
+                    "en una zona de sobreventa."
                 )
 
             else:
 
-                # --------------------------------
-                # DATOS BÁSICOS
-                # --------------------------------
+                st.info(
+                    "El RSI se encuentra en una zona intermedia."
+                )
 
-                precio = datos["Close"].iloc[-1]
-                precio_anterior = datos["Close"].iloc[-2]
+            # ==========================================
+            # FUNDAMENTALES
+            # ==========================================
 
-                variacion = (
-                    (precio - precio_anterior)
-                    / precio_anterior
+            st.divider()
+
+            st.header("💰 Fundamentales")
+
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+
+                if market_cap:
+                    st.metric(
+                        "Capitalización",
+                        f"${market_cap / 1e9:.2f} B"
+                    )
+                else:
+                    st.metric(
+                        "Capitalización",
+                        "N/D"
+                    )
+
+            with col2:
+
+                if pe:
+                    st.metric(
+                        "PER",
+                        f"{pe:.2f}"
+                    )
+                else:
+                    st.metric(
+                        "PER",
+                        "N/D"
+                    )
+
+            with col3:
+
+                if forward_pe:
+                    st.metric(
+                        "PER futuro",
+                        f"{forward_pe:.2f}"
+                    )
+                else:
+                    st.metric(
+                        "PER futuro",
+                        "N/D"
+                    )
+
+            with col4:
+
+                if price_to_book:
+                    st.metric(
+                        "Precio/Valor contable",
+                        f"{price_to_book:.2f}"
+                    )
+                else:
+                    st.metric(
+                        "Precio/Valor contable",
+                        "N/D"
+                    )
+
+            st.subheader("📋 Crecimiento y rentabilidad")
+
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+
+                if revenue_growth is not None:
+                    st.metric(
+                        "Crecimiento ingresos",
+                        f"{revenue_growth * 100:.2f}%"
+                    )
+                else:
+                    st.metric(
+                        "Crecimiento ingresos",
+                        "N/D"
+                    )
+
+            with col2:
+
+                if earnings_growth is not None:
+                    st.metric(
+                        "Crecimiento beneficios",
+                        f"{earnings_growth * 100:.2f}%"
+                    )
+                else:
+                    st.metric(
+                        "Crecimiento beneficios",
+                        "N/D"
+                    )
+
+            with col3:
+
+                if profit_margin is not None:
+                    st.metric(
+                        "Margen beneficio",
+                        f"{profit_margin * 100:.2f}%"
+                    )
+                else:
+                    st.metric(
+                        "Margen beneficio",
+                        "N/D"
+                    )
+
+            with col4:
+
+                if return_on_equity is not None:
+                    st.metric(
+                        "ROE",
+                        f"{return_on_equity * 100:.2f}%"
+                    )
+                else:
+                    st.metric(
+                        "ROE",
+                        "N/D"
+                    )
+
+            st.subheader("🏦 Deuda y flujo de caja")
+
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+
+                if debt_to_equity is not None:
+                    st.metric(
+                        "Deuda / Capital",
+                        f"{debt_to_equity:.2f}"
+                    )
+                else:
+                    st.metric(
+                        "Deuda / Capital",
+                        "N/D"
+                    )
+
+            with col2:
+
+                if operating_margin is not None:
+                    st.metric(
+                        "Margen operativo",
+                        f"{operating_margin * 100:.2f}%"
+                    )
+                else:
+                    st.metric(
+                        "Margen operativo",
+                        "N/D"
+                    )
+
+            with col3:
+
+                if free_cash_flow:
+
+                    st.metric(
+                        "Flujo de caja libre",
+                        f"${free_cash_flow / 1e9:.2f} B"
+                    )
+
+                else:
+
+                    st.metric(
+                        "Flujo de caja libre",
+                        "N/D"
+                    )
+
+            # ==========================================
+            # PRECIO OBJETIVO DE ANALISTAS
+            # ==========================================
+
+            st.divider()
+
+            st.header("🎯 Precio objetivo")
+
+            if target_price:
+
+                diferencia_objetivo = (
+                    (target_price - precio)
+                    / precio
                 ) * 100
 
-                maximo = datos["High"].max()
-                minimo = datos["Low"].min()
-
-                volumen = datos["Volume"].iloc[-1]
-
-                # --------------------------------
-                # MEDIAS MÓVILES
-                # --------------------------------
-
-                datos["MA20"] = datos["Close"].rolling(20).mean()
-                datos["MA50"] = datos["Close"].rolling(50).mean()
-                datos["MA200"] = datos["Close"].rolling(200).mean()
-
-                # --------------------------------
-                # RSI
-                # --------------------------------
-
-                diferencia = datos["Close"].diff()
-
-                ganancias = diferencia.where(
-                    diferencia > 0, 0
-                )
-
-                perdidas = -diferencia.where(
-                    diferencia < 0, 0
-                )
-
-                media_ganancias = ganancias.rolling(14).mean()
-                media_perdidas = perdidas.rolling(14).mean()
-
-                rs = (
-                    media_ganancias /
-                    media_perdidas
-                )
-
-                datos["RSI"] = 100 - (
-                    100 / (1 + rs)
-                )
-
-                rsi_actual = datos["RSI"].iloc[-1]
-
-                # --------------------------------
-                # VOLATILIDAD
-                # --------------------------------
-
-                retornos = datos["Close"].pct_change()
-
-                volatilidad = (
-                    retornos.std() *
-                    np.sqrt(252) *
-                    100
-                )
-
-                # --------------------------------
-                # TENDENCIA
-                # --------------------------------
-
-                ma20 = datos["MA20"].iloc[-1]
-                ma50 = datos["MA50"].iloc[-1]
-                ma200 = datos["MA200"].iloc[-1]
-
-                puntos_tendencia = 0
-
-                if precio > ma20:
-                    puntos_tendencia += 1
-
-                if precio > ma50:
-                    puntos_tendencia += 1
-
-                if not pd.isna(ma200):
-
-                    if precio > ma200:
-                        puntos_tendencia += 1
-
-                if puntos_tendencia >= 3:
-
-                    tendencia = "🟢 ALCISTA"
-
-                elif puntos_tendencia == 2:
-
-                    tendencia = "🟡 NEUTRAL-ALCISTA"
-
-                elif puntos_tendencia == 1:
-
-                    tendencia = "🟠 NEUTRAL-BAJISTA"
-
-                else:
-
-                    tendencia = "🔴 BAJISTA"
-
-                # --------------------------------
-                # DATOS PRINCIPALES
-                # --------------------------------
-
-                st.success(
-                    f"Análisis completado: {ticker}"
-                )
-
-                col1, col2, col3, col4 = st.columns(4)
+                col1, col2 = st.columns(2)
 
                 with col1:
 
                     st.metric(
-                        "Precio",
-                        f"${precio:,.2f}",
-                        f"{variacion:+.2f}%"
+                        "Objetivo medio analistas",
+                        f"${target_price:,.2f}"
                     )
 
                 with col2:
 
                     st.metric(
-                        "Máximo",
-                        f"${maximo:,.2f}"
+                        "Potencial estimado",
+                        f"{diferencia_objetivo:+.2f}%"
                     )
 
-                with col3:
+            else:
 
-                    st.metric(
-                        "Mínimo",
-                        f"${minimo:,.2f}"
-                    )
-
-                with col4:
-
-                    st.metric(
-                        "Volatilidad anual",
-                        f"{volatilidad:.2f}%"
-                    )
-
-                # --------------------------------
-                # GRÁFICO
-                # --------------------------------
-
-                st.divider()
-
-                st.subheader(
-                    "📈 Gráfico técnico"
+                st.info(
+                    "No hay un precio objetivo disponible."
                 )
 
-                figura = go.Figure()
+            # ==========================================
+            # PRIMERA VALORACIÓN
+            # ==========================================
 
-                figura.add_trace(
-                    go.Candlestick(
-                        x=datos.index,
-                        open=datos["Open"],
-                        high=datos["High"],
-                        low=datos["Low"],
-                        close=datos["Close"],
-                        name=ticker
-                    )
-                )
+            st.divider()
 
-                figura.add_trace(
-                    go.Scatter(
-                        x=datos.index,
-                        y=datos["MA20"],
-                        name="Media 20"
-                    )
-                )
+            st.header("🔎 Primera valoración")
 
-                figura.add_trace(
-                    go.Scatter(
-                        x=datos.index,
-                        y=datos["MA50"],
-                        name="Media 50"
-                    )
-                )
+            señales_positivas = 0
+            señales_negativas = 0
 
-                figura.add_trace(
-                    go.Scatter(
-                        x=datos.index,
-                        y=datos["MA200"],
-                        name="Media 200"
-                    )
-                )
+            # PER
 
-                figura.update_layout(
-                    xaxis_title="Fecha",
-                    yaxis_title="Precio",
-                    xaxis_rangeslider_visible=False,
-                    height=600
-                )
+            if pe:
 
-                st.plotly_chart(
-                    figura,
-                    use_container_width=True
-                )
+                if pe < 20:
+                    señales_positivas += 1
 
-                # --------------------------------
-                # INDICADORES
-                # --------------------------------
+                elif pe > 35:
+                    señales_negativas += 1
 
-                st.divider()
+            # Crecimiento
 
-                st.subheader(
-                    "🧠 Indicadores técnicos"
-                )
+            if earnings_growth:
 
-                col1, col2, col3 = st.columns(3)
+                if earnings_growth > 0.10:
+                    señales_positivas += 1
 
-                with col1:
+                elif earnings_growth < 0:
+                    señales_negativas += 1
 
-                    st.metric(
-                        "Tendencia",
-                        tendencia
-                    )
+            # ROE
 
-                with col2:
+            if return_on_equity:
 
-                    st.metric(
-                        "RSI",
-                        f"{rsi_actual:.2f}"
-                    )
+                if return_on_equity > 0.15:
+                    señales_positivas += 1
 
-                with col3:
+                elif return_on_equity < 0:
+                    señales_negativas += 1
 
-                    st.metric(
-                        "Volatilidad",
-                        f"{volatilidad:.2f}%"
-                    )
+            # Deuda
 
-                # --------------------------------
-                # INTERPRETACIÓN RSI
-                # --------------------------------
+            if debt_to_equity:
 
-                if rsi_actual >= 70:
+                if debt_to_equity < 100:
+                    señales_positivas += 1
 
-                    rsi_diagnostico = (
-                        "⚠️ RSI elevado: el activo podría "
-                        "estar sobrecomprado."
-                    )
+                elif debt_to_equity > 200:
+                    señales_negativas += 1
 
-                elif rsi_actual <= 30:
+            # Precio objetivo
 
-                    rsi_diagnostico = (
-                        "🟢 RSI bajo: el activo podría "
-                        "estar sobrevendido."
-                    )
+            if target_price:
 
-                else:
+                if target_price > precio * 1.10:
+                    señales_positivas += 1
 
-                    rsi_diagnostico = (
-                        "🟡 RSI en una zona intermedia."
-                    )
+                elif target_price < precio * 0.90:
+                    señales_negativas += 1
 
-                st.info(rsi_diagnostico)
+            if señales_positivas > señales_negativas:
 
-                # --------------------------------
-                # DIAGNÓSTICO TÉCNICO
-                # --------------------------------
+                valoracion = "🟢 FUNDAMENTALES FAVORABLES"
 
-                st.divider()
+            elif señales_negativas > señales_positivas:
 
-                st.subheader(
-                    "🔎 Diagnóstico técnico"
-                )
+                valoracion = "🔴 FUNDAMENTALES DESFAVORABLES"
 
-                if puntos_tendencia >= 3:
+            else:
 
-                    diagnostico = (
-                        "La estructura actual presenta "
-                        "una tendencia predominantemente alcista. "
-                        "El precio se encuentra por encima de "
-                        "las principales medias móviles."
-                    )
+                valoracion = "🟡 FUNDAMENTALES MIXTOS"
 
-                elif puntos_tendencia == 2:
+            st.subheader(valoracion)
 
-                    diagnostico = (
-                        "La estructura presenta señales "
-                        "moderadamente alcistas, aunque "
-                        "no todas las medias móviles confirman "
-                        "la tendencia."
-                    )
+            st.write(
+                f"Señales positivas detectadas: "
+                f"**{señales_positivas}**"
+            )
 
-                elif puntos_tendencia == 1:
+            st.write(
+                f"Señales negativas detectadas: "
+                f"**{señales_negativas}**"
+            )
 
-                    diagnostico = (
-                        "La estructura presenta señales "
-                        "moderadamente bajistas."
-                    )
-
-                else:
-
-                    diagnostico = (
-                        "La estructura presenta una "
-                        "tendencia predominantemente bajista."
-                    )
-
-                st.write(diagnostico)
-
-                st.warning(
-                    "⚠️ Este análisis es experimental. "
-                    "Todavía no constituye una recomendación "
-                    "de inversión."
-                )
+            st.warning(
+                "⚠️ Esta valoración es experimental. "
+                "Todavía no representa una recomendación "
+                "de inversión."
+            )
 
         except Exception as error:
 
