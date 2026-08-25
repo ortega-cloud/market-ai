@@ -19,7 +19,75 @@ st.title("📈 MARKET AI")
 st.subheader("Sistema inteligente de análisis de mercados")
 
 st.divider()
+# =========================================================
+# ALPHA VANTAGE - PRECIO ACTUAL
+# =========================================================
 
+@st.cache_data(ttl=900)
+def obtener_precio_alpha_vantage(ticker):
+
+    try:
+
+        api_key = st.secrets["ALPHA_VANTAGE_API_KEY"]
+
+        url = "https://www.alphavantage.co/query"
+
+        parametros = {
+            "function": "GLOBAL_QUOTE",
+            "symbol": ticker,
+            "apikey": api_key
+        }
+
+        respuesta = requests.get(
+            url,
+            params=parametros,
+            timeout=10
+        )
+
+        datos = respuesta.json()
+
+        # Comprobar errores de API
+
+        if "Note" in datos:
+
+            return None, "Límite de peticiones alcanzado"
+
+        if "Information" in datos:
+
+            return None, datos["Information"]
+
+        if "Error Message" in datos:
+
+            return None, "Símbolo no válido"
+
+        # Obtener cotización
+
+        quote = datos.get(
+            "Global Quote",
+            {}
+        )
+
+        precio = quote.get(
+            "05. price"
+        )
+
+        fecha = quote.get(
+            "07. latest trading day"
+        )
+
+        if not precio:
+
+            return None, "Precio no disponible"
+
+        return {
+            "precio": float(precio),
+            "fecha": fecha,
+            "fuente": "Alpha Vantage"
+        }, None
+
+    except Exception as error:
+
+        return None, str(error)
 
 # =========================================================
 # OBTENER PRECIOS
@@ -563,9 +631,39 @@ if st.button("📊 Analizar mercado"):
     with st.spinner(
         f"Analizando {ticker}..."
     ):
+        # =================================================
+        # PRECIO ALPHA VANTAGE
+        # =================================================
 
+        precio_alpha, error_alpha = (
+            obtener_precio_alpha_vantage(ticker)
+        )
         try:
+        # =================================================
+        # PRECIO DE MERCADO
+        # =================================================
 
+        if precio_alpha:
+
+            precio_mercado = precio_alpha["precio"]
+
+            fecha_precio = precio_alpha["fecha"]
+
+            st.info(
+                f"💵 Precio de mercado: "
+                f"${precio_mercado:,.2f}  |  "
+                f"Fuente: Alpha Vantage  |  "
+                f"Última sesión: {fecha_precio}"
+            )
+
+        else:
+
+            precio_mercado = None
+
+            st.warning(
+                f"No se pudo obtener el precio de "
+                f"Alpha Vantage: {error_alpha}"
+            )
             # =================================================
             # DATOS
             # =================================================
