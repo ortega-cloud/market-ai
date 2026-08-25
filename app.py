@@ -1,6 +1,8 @@
 import streamlit as st
 import yfinance as yf
 import plotly.graph_objects as go
+import pandas as pd
+import numpy as np
 
 st.set_page_config(
     page_title="MARKET AI",
@@ -23,24 +25,30 @@ ticker = st.text_input(
 
 periodo = st.selectbox(
     "Periodo del gráfico",
-    ["1mo", "3mo", "6mo", "1y", "2y", "5y"],
-    index=3
+    ["3mo", "6mo", "1y", "2y", "5y"],
+    index=2
 )
 
 if st.button("📊 Analizar mercado"):
 
-    with st.spinner("Obteniendo datos del mercado..."):
+    with st.spinner("Analizando el mercado..."):
 
         try:
+
             activo = yf.Ticker(ticker)
             datos = activo.history(period=periodo)
 
             if datos.empty:
+
                 st.error(
-                    "No se han encontrado datos para este activo. "
-                    "Comprueba el símbolo."
+                    "No se han encontrado datos para este activo."
                 )
+
             else:
+
+                # --------------------------------
+                # DATOS BÁSICOS
+                # --------------------------------
 
                 precio = datos["Close"].iloc[-1]
                 precio_anterior = datos["Close"].iloc[-2]
@@ -52,15 +60,106 @@ if st.button("📊 Analizar mercado"):
 
                 maximo = datos["High"].max()
                 minimo = datos["Low"].min()
+
                 volumen = datos["Volume"].iloc[-1]
 
+                # --------------------------------
+                # MEDIAS MÓVILES
+                # --------------------------------
+
+                datos["MA20"] = datos["Close"].rolling(20).mean()
+                datos["MA50"] = datos["Close"].rolling(50).mean()
+                datos["MA200"] = datos["Close"].rolling(200).mean()
+
+                # --------------------------------
+                # RSI
+                # --------------------------------
+
+                diferencia = datos["Close"].diff()
+
+                ganancias = diferencia.where(
+                    diferencia > 0, 0
+                )
+
+                perdidas = -diferencia.where(
+                    diferencia < 0, 0
+                )
+
+                media_ganancias = ganancias.rolling(14).mean()
+                media_perdidas = perdidas.rolling(14).mean()
+
+                rs = (
+                    media_ganancias /
+                    media_perdidas
+                )
+
+                datos["RSI"] = 100 - (
+                    100 / (1 + rs)
+                )
+
+                rsi_actual = datos["RSI"].iloc[-1]
+
+                # --------------------------------
+                # VOLATILIDAD
+                # --------------------------------
+
+                retornos = datos["Close"].pct_change()
+
+                volatilidad = (
+                    retornos.std() *
+                    np.sqrt(252) *
+                    100
+                )
+
+                # --------------------------------
+                # TENDENCIA
+                # --------------------------------
+
+                ma20 = datos["MA20"].iloc[-1]
+                ma50 = datos["MA50"].iloc[-1]
+                ma200 = datos["MA200"].iloc[-1]
+
+                puntos_tendencia = 0
+
+                if precio > ma20:
+                    puntos_tendencia += 1
+
+                if precio > ma50:
+                    puntos_tendencia += 1
+
+                if not pd.isna(ma200):
+
+                    if precio > ma200:
+                        puntos_tendencia += 1
+
+                if puntos_tendencia >= 3:
+
+                    tendencia = "🟢 ALCISTA"
+
+                elif puntos_tendencia == 2:
+
+                    tendencia = "🟡 NEUTRAL-ALCISTA"
+
+                elif puntos_tendencia == 1:
+
+                    tendencia = "🟠 NEUTRAL-BAJISTA"
+
+                else:
+
+                    tendencia = "🔴 BAJISTA"
+
+                # --------------------------------
+                # DATOS PRINCIPALES
+                # --------------------------------
+
                 st.success(
-                    f"Datos encontrados para {ticker}"
+                    f"Análisis completado: {ticker}"
                 )
 
                 col1, col2, col3, col4 = st.columns(4)
 
                 with col1:
+
                     st.metric(
                         "Precio",
                         f"${precio:,.2f}",
@@ -68,26 +167,35 @@ if st.button("📊 Analizar mercado"):
                     )
 
                 with col2:
+
                     st.metric(
-                        "Máximo periodo",
+                        "Máximo",
                         f"${maximo:,.2f}"
                     )
 
                 with col3:
+
                     st.metric(
-                        "Mínimo periodo",
+                        "Mínimo",
                         f"${minimo:,.2f}"
                     )
 
                 with col4:
+
                     st.metric(
-                        "Volumen",
-                        f"{volumen:,.0f}"
+                        "Volatilidad anual",
+                        f"{volatilidad:.2f}%"
                     )
+
+                # --------------------------------
+                # GRÁFICO
+                # --------------------------------
 
                 st.divider()
 
-                st.subheader("📈 Evolución del precio")
+                st.subheader(
+                    "📈 Gráfico técnico"
+                )
 
                 figura = go.Figure()
 
@@ -102,11 +210,35 @@ if st.button("📊 Analizar mercado"):
                     )
                 )
 
+                figura.add_trace(
+                    go.Scatter(
+                        x=datos.index,
+                        y=datos["MA20"],
+                        name="Media 20"
+                    )
+                )
+
+                figura.add_trace(
+                    go.Scatter(
+                        x=datos.index,
+                        y=datos["MA50"],
+                        name="Media 50"
+                    )
+                )
+
+                figura.add_trace(
+                    go.Scatter(
+                        x=datos.index,
+                        y=datos["MA200"],
+                        name="Media 200"
+                    )
+                )
+
                 figura.update_layout(
                     xaxis_title="Fecha",
                     yaxis_title="Precio",
                     xaxis_rangeslider_visible=False,
-                    height=550
+                    height=600
                 )
 
                 st.plotly_chart(
@@ -114,30 +246,119 @@ if st.button("📊 Analizar mercado"):
                     use_container_width=True
                 )
 
+                # --------------------------------
+                # INDICADORES
+                # --------------------------------
+
                 st.divider()
 
-                st.subheader("📋 Primer diagnóstico")
+                st.subheader(
+                    "🧠 Indicadores técnicos"
+                )
 
-                if precio > datos["Close"].mean():
-                    st.info(
-                        "El precio actual se encuentra por encima "
-                        "de la media del periodo seleccionado."
+                col1, col2, col3 = st.columns(3)
+
+                with col1:
+
+                    st.metric(
+                        "Tendencia",
+                        tendencia
                     )
+
+                with col2:
+
+                    st.metric(
+                        "RSI",
+                        f"{rsi_actual:.2f}"
+                    )
+
+                with col3:
+
+                    st.metric(
+                        "Volatilidad",
+                        f"{volatilidad:.2f}%"
+                    )
+
+                # --------------------------------
+                # INTERPRETACIÓN RSI
+                # --------------------------------
+
+                if rsi_actual >= 70:
+
+                    rsi_diagnostico = (
+                        "⚠️ RSI elevado: el activo podría "
+                        "estar sobrecomprado."
+                    )
+
+                elif rsi_actual <= 30:
+
+                    rsi_diagnostico = (
+                        "🟢 RSI bajo: el activo podría "
+                        "estar sobrevendido."
+                    )
+
                 else:
-                    st.info(
-                        "El precio actual se encuentra por debajo "
-                        "de la media del periodo seleccionado."
+
+                    rsi_diagnostico = (
+                        "🟡 RSI en una zona intermedia."
                     )
+
+                st.info(rsi_diagnostico)
+
+                # --------------------------------
+                # DIAGNÓSTICO TÉCNICO
+                # --------------------------------
+
+                st.divider()
+
+                st.subheader(
+                    "🔎 Diagnóstico técnico"
+                )
+
+                if puntos_tendencia >= 3:
+
+                    diagnostico = (
+                        "La estructura actual presenta "
+                        "una tendencia predominantemente alcista. "
+                        "El precio se encuentra por encima de "
+                        "las principales medias móviles."
+                    )
+
+                elif puntos_tendencia == 2:
+
+                    diagnostico = (
+                        "La estructura presenta señales "
+                        "moderadamente alcistas, aunque "
+                        "no todas las medias móviles confirman "
+                        "la tendencia."
+                    )
+
+                elif puntos_tendencia == 1:
+
+                    diagnostico = (
+                        "La estructura presenta señales "
+                        "moderadamente bajistas."
+                    )
+
+                else:
+
+                    diagnostico = (
+                        "La estructura presenta una "
+                        "tendencia predominantemente bajista."
+                    )
+
+                st.write(diagnostico)
 
                 st.warning(
-                    "⚠️ Este diagnóstico es únicamente una primera "
-                    "lectura del mercado. Todavía no constituye una "
-                    "recomendación de inversión."
+                    "⚠️ Este análisis es experimental. "
+                    "Todavía no constituye una recomendación "
+                    "de inversión."
                 )
 
         except Exception as error:
+
             st.error(
-                f"Ha ocurrido un error al obtener los datos: {error}"
+                f"Ha ocurrido un error: {error}"
             )
 
 st.divider()
