@@ -669,19 +669,19 @@ with st.spinner(
 
 
     try:
-           
-            # =================================================
-            # DATOS
-            # =================================================
 
-            datos = obtener_precios(
-                ticker,
-                periodo
-            )
+        # =================================================
+        # DATOS
+        # =================================================
 
-            fundamentales = obtener_fundamentales(
-                ticker
-            )
+        datos = obtener_precios(
+            ticker,
+            periodo
+        )
+
+        fundamentales = obtener_fundamentales(
+            ticker
+        )
 
 
             if datos.empty:
