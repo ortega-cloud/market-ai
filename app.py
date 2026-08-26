@@ -1736,6 +1736,10 @@ analizar = st.sidebar.button(
     type="primary"
 )
 
+ranking_sp500 = st.sidebar.button(
+    "🏆 TOP 5 S&P 500"
+)
+
 
 st.info(
     "Introduce un ticker y pulsa ANALIZAR."
@@ -1745,6 +1749,163 @@ st.info(
 # =========================================================
 # ANÁLISIS
 # =========================================================
+
+# =========================================================
+# RANKING AUTOMÁTICO S&P 500
+# =========================================================
+
+if ranking_sp500:
+
+    st.divider()
+
+    st.header(
+        "🏆 TOP 5 — S&P 500"
+    )
+
+    st.caption(
+        "MARKET AI realiza una primera criba técnica "
+        "y posteriormente analiza valoración, DCF, "
+        "fundamentales y objetivos de analistas."
+    )
+
+
+    with st.spinner(
+        "Escaneando el S&P 500... "
+        "La primera ejecución puede tardar unos minutos."
+    ):
+
+        ranking = escanear_sp500(
+            candidatos_finales=20
+        )
+
+
+    if ranking.empty:
+
+        st.error(
+            "No se ha podido completar el escaneo. "
+            "Puede deberse a un límite temporal "
+            "de la fuente de datos."
+        )
+
+
+    else:
+
+        st.success(
+            f"Se han analizado "
+            f"{len(ranking)} candidatos finales."
+        )
+
+
+        st.subheader(
+            "🥇 Las 5 mejores oportunidades"
+        )
+
+
+        top5 = ranking.head(5)
+
+
+        for posicion, (
+            _,
+            fila
+        ) in enumerate(
+            top5.iterrows(),
+            start=1
+        ):
+
+            st.markdown(
+                f"### {posicion}. "
+                f"{fila['Ticker']} — "
+                f"{fila['Empresa']}"
+            )
+
+
+            c1, c2, c3, c4 = (
+                st.columns(4)
+            )
+
+
+            with c1:
+
+                st.metric(
+                    "Precio",
+                    f"${fila['Precio']:,.2f}"
+                )
+
+
+            with c2:
+
+                if pd.notna(
+                    fila["Fair Value"]
+                ):
+
+                    st.metric(
+                        "Fair Value",
+                        f"${fila['Fair Value']:,.2f}"
+                    )
+
+                else:
+
+                    st.metric(
+                        "Fair Value",
+                        "N/D"
+                    )
+
+
+            with c3:
+
+                if pd.notna(
+                    fila["Potencial %"]
+                ):
+
+                    st.metric(
+                        "Potencial",
+                        f"{fila['Potencial %']:+.1f}%"
+                    )
+
+                else:
+
+                    st.metric(
+                        "Potencial",
+                        "N/D"
+                    )
+
+
+            with c4:
+
+                st.metric(
+                    "MARKET AI",
+                    f"{fila['MARKET AI']:.1f}/100"
+                )
+
+
+            st.write(
+                f"**Diagnóstico:** "
+                f"{fila['Diagnóstico']}  |  "
+                f"**RSI:** "
+                f"{fila['RSI']:.1f}"
+            )
+
+
+            st.divider()
+
+
+        st.subheader(
+            "📊 Ranking completo"
+        )
+
+
+        st.dataframe(
+            ranking,
+            use_container_width=True,
+            hide_index=True
+        )
+
+
+        st.warning(
+            "⚠️ Este ranking es experimental "
+            "y no garantiza rentabilidad."
+        )
+
 
 if analizar:
 
@@ -3187,6 +3348,102 @@ if analizar:
             "No hay suficiente Free Cash Flow o acciones en circulación para calcular el DCF de forma fiable."
         )
 
+
+# =====================================================
+# MARKET AI FAIR VALUE COMBINADO
+# =====================================================
+
+st.divider()
+
+st.header(
+    "💠 MARKET AI FAIR VALUE"
+)
+
+st.caption(
+    "Estimación combinada de DCF, "
+    "objetivo de analistas y valoración "
+    "por beneficios."
+)
+
+
+fair_value = (
+    calcular_fair_value_combinado(
+        precio_analisis,
+
+        valor_base
+        if "valor_base" in locals()
+        else None,
+
+        objetivo_medio,
+
+        eps,
+
+        crecimiento_beneficios
+    )
+)
+
+
+estado_fair, potencial_fair = (
+    diagnosticar_fair_value(
+        precio_analisis,
+        fair_value
+    )
+)
+
+
+c1, c2, c3 = st.columns(3)
+
+
+with c1:
+
+    st.metric(
+        "Precio actual",
+
+        (
+            f"${precio_analisis:,.2f}"
+            if precio_analisis is not None
+            else "N/D"
+        )
+    )
+
+
+with c2:
+
+    st.metric(
+        "Fair Value",
+
+        (
+            f"${fair_value:,.2f}"
+            if fair_value is not None
+            else "N/D"
+        )
+    )
+
+
+with c3:
+
+    st.metric(
+        "Potencial",
+
+        (
+            f"{potencial_fair:+.2f}%"
+            if potencial_fair is not None
+            else "N/D"
+        )
+    )
+
+
+st.write(
+    f"### {estado_fair}"
+)
+
+
+st.info(
+    "El Fair Value es una estimación "
+    "experimental y no constituye "
+    "asesoramiento financiero."
+)
+   
 
     # =====================================================
     # DIAGNÓSTICO
