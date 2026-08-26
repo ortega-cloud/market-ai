@@ -3368,7 +3368,7 @@ st.caption(
 
 fair_value = (
     calcular_fair_value_combinado(
-        precio_analisis if "precio_analisis" in locals () else None,
+        precio_analisis if "precio_analisis" in locals() else None,
 
         valor_base
         if "valor_base" in locals()
