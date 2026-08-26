@@ -63,8 +63,163 @@ def obtener_valor(diccionario, claves):
 # INFORMACIÓN FINANCIERA ROBUSTA
 # =========================================================
 
+# =========================================================
+# OBJETIVOS DE ANALISTAS — MULTIFUENTE
+# =========================================================
+
 @st.cache_data(ttl=3600)
-def obtener_info(ticker):
+def obtener_objetivos_analistas(ticker):
+
+    resultado = {}
+
+
+    try:
+
+        empresa = yf.Ticker(ticker)
+
+
+        # -------------------------------------------------
+        # MÉTODO 1
+        # -------------------------------------------------
+
+        try:
+
+            datos = (
+                empresa.get_analyst_price_targets()
+            )
+
+            if datos is not None:
+
+                if hasattr(
+                    datos,
+                    "to_dict"
+                ):
+
+                    datos = (
+                        datos.to_dict()
+                    )
+
+
+                if isinstance(
+                    datos,
+                    dict
+                ):
+
+                    resultado.update(
+                        datos
+                    )
+
+        except Exception:
+            pass
+
+
+        # -------------------------------------------------
+        # MÉTODO 2
+        # -------------------------------------------------
+
+        try:
+
+            datos = (
+                empresa.analyst_price_targets
+            )
+
+            if datos is not None:
+
+                if hasattr(
+                    datos,
+                    "to_dict"
+                ):
+
+                    datos = (
+                        datos.to_dict()
+                    )
+
+
+                if isinstance(
+                    datos,
+                    dict
+                ):
+
+                    for clave, valor in datos.items():
+
+                        if (
+                            clave
+                            not in resultado
+                            or resultado.get(
+                                clave
+                            ) is None
+                        ):
+
+                            resultado[
+                                clave
+                            ] = valor
+
+        except Exception:
+            pass
+
+
+        # -------------------------------------------------
+        # MÉTODO 3 — INFO
+        # -------------------------------------------------
+
+        try:
+
+            info = obtener_info(
+                ticker
+            )
+
+
+            equivalencias = {
+
+                "low":
+                    "targetLowPrice",
+
+                "mean":
+                    "targetMeanPrice",
+
+                "median":
+                    "targetMedianPrice",
+
+                "high":
+                    "targetHighPrice"
+
+            }
+
+
+            for destino, origen in equivalencias.items():
+
+                if (
+                    destino
+                    not in resultado
+                    or resultado.get(
+                        destino
+                    ) is None
+                ):
+
+                    valor = (
+                        limpiar_numero(
+                            info.get(
+                                origen
+                            )
+                        )
+                    )
+
+
+                    if valor is not None:
+
+                        resultado[
+                            destino
+                        ] = valor
+
+        except Exception:
+            pass
+
+
+    except Exception:
+        pass
+
+
+    return resultado
 
     info = {}
 
@@ -895,8 +1050,61 @@ def obtener_upgrades_downgrades(ticker):
 # ESTIMACIONES EPS
 # =========================================================
 
+# =========================================================
+# ESTIMACIONES EPS — MULTIFUENTE
+# =========================================================
+
 @st.cache_data(ttl=3600)
 def obtener_estimaciones_eps(ticker):
+
+    try:
+
+        empresa = yf.Ticker(
+            ticker
+        )
+
+
+        # Primero usamos el método moderno
+        try:
+
+            datos = (
+                empresa.get_earnings_estimate()
+            )
+
+            if (
+                datos is not None
+                and not datos.empty
+            ):
+
+                return datos
+
+        except Exception:
+            pass
+
+
+        # Compatibilidad con versiones anteriores
+        try:
+
+            datos = (
+                empresa.earnings_estimate
+            )
+
+            if (
+                datos is not None
+                and not datos.empty
+            ):
+
+                return datos
+
+        except Exception:
+            pass
+
+
+    except Exception:
+        pass
+
+
+    return pd.DataFrame()
     try:
         empresa = yf.Ticker(ticker)
         datos = empresa.earnings_estimate
@@ -907,8 +1115,59 @@ def obtener_estimaciones_eps(ticker):
         return pd.DataFrame()
 
 
+# =========================================================
+# ESTIMACIONES DE INGRESOS
+# =========================================================
+
 @st.cache_data(ttl=3600)
 def obtener_estimaciones_ingresos(ticker):
+
+    try:
+
+        empresa = yf.Ticker(
+            ticker
+        )
+
+
+        try:
+
+            datos = (
+                empresa.get_revenue_estimate()
+            )
+
+            if (
+                datos is not None
+                and not datos.empty
+            ):
+
+                return datos
+
+        except Exception:
+            pass
+
+
+        try:
+
+            datos = (
+                empresa.revenue_estimate
+            )
+
+            if (
+                datos is not None
+                and not datos.empty
+            ):
+
+                return datos
+
+        except Exception:
+            pass
+
+
+    except Exception:
+        pass
+
+
+    return pd.DataFrame()
     try:
         empresa = yf.Ticker(ticker)
         datos = empresa.revenue_estimate
@@ -920,7 +1179,55 @@ def obtener_estimaciones_ingresos(ticker):
 
 
 @st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600)
 def obtener_revisiones_eps(ticker):
+
+    try:
+
+        empresa = yf.Ticker(
+            ticker
+        )
+
+
+        try:
+
+            datos = (
+                empresa.get_eps_revisions()
+            )
+
+            if (
+                datos is not None
+                and not datos.empty
+            ):
+
+                return datos
+
+        except Exception:
+            pass
+
+
+        try:
+
+            datos = (
+                empresa.eps_revisions
+            )
+
+            if (
+                datos is not None
+                and not datos.empty
+            ):
+
+                return datos
+
+        except Exception:
+            pass
+
+
+    except Exception:
+        pass
+
+
+    return pd.DataFrame()
     try:
         empresa = yf.Ticker(ticker)
         datos = empresa.eps_revisions
@@ -932,7 +1239,55 @@ def obtener_revisiones_eps(ticker):
 
 
 @st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600)
 def obtener_tendencia_eps(ticker):
+
+    try:
+
+        empresa = yf.Ticker(
+            ticker
+        )
+
+
+        try:
+
+            datos = (
+                empresa.get_eps_trend()
+            )
+
+            if (
+                datos is not None
+                and not datos.empty
+            ):
+
+                return datos
+
+        except Exception:
+            pass
+
+
+        try:
+
+            datos = (
+                empresa.eps_trend
+            )
+
+            if (
+                datos is not None
+                and not datos.empty
+            ):
+
+                return datos
+
+        except Exception:
+            pass
+
+
+    except Exception:
+        pass
+
+
+    return pd.DataFrame()
     try:
         empresa = yf.Ticker(ticker)
         datos = empresa.eps_trend
@@ -944,7 +1299,55 @@ def obtener_tendencia_eps(ticker):
 
 
 @st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600)
 def obtener_crecimiento_estimado(ticker):
+
+    try:
+
+        empresa = yf.Ticker(
+            ticker
+        )
+
+
+        try:
+
+            datos = (
+                empresa.get_growth_estimates()
+            )
+
+            if (
+                datos is not None
+                and not datos.empty
+            ):
+
+                return datos
+
+        except Exception:
+            pass
+
+
+        try:
+
+            datos = (
+                empresa.growth_estimates
+            )
+
+            if (
+                datos is not None
+                and not datos.empty
+            ):
+
+                return datos
+
+        except Exception:
+            pass
+
+
+    except Exception:
+        pass
+
+
+    return pd.DataFrame()
     try:
         empresa = yf.Ticker(ticker)
         datos = empresa.growth_estimates
@@ -1769,11 +2172,23 @@ if analizar:
         precio_mercado = precio_alpha["precio"]
         fecha_precio = precio_alpha["fecha"]
         st.info(f"💵 Precio: **${precio_mercado:,.2f}** | Alpha Vantage | {fecha_precio}")
-    else:
-        precio_mercado = None
-        st.warning("Alpha Vantage no ha proporcionado el precio.")
-        st.caption(str(error_alpha))
+else:
 
+    precio_mercado = None
+
+    st.warning(
+        "⚠️ Alpha Vantage no ha proporcionado "
+        "el precio en este momento."
+    )
+
+    st.caption(
+        f"Motivo: {error_alpha}"
+    )
+
+    st.info(
+        "MARKET AI utilizará automáticamente "
+        "el último precio disponible de Yahoo Finance."
+    )
     if tipo_precio == "Precio personalizado" and precio_personalizado is not None:
         precio_analisis = float(precio_personalizado)
     elif precio_mercado is not None:
@@ -2044,7 +2459,12 @@ if analizar:
     st.caption("Estimación experimental del valor razonable mediante un modelo de Discounted Cash Flow (DCF).")
 
     valor_base = None
-    if flujo_caja and flujo_caja > 0 and acciones_en_circulacion and acciones_en_circulacion > 0:
+     if (
+    flujo_caja is not None
+    and flujo_caja > 0
+    and acciones_en_circulacion is not None
+    and acciones_en_circulacion > 0
+):
         escenarios_dcf = calcular_escenarios_dcf(
             free_cash_flow=flujo_caja,
             deuda=deuda_total if deuda_total is not None else 0,
