@@ -3400,9 +3400,7 @@ with c1:
         "Precio actual",
 
         (
-            f"${precio_analisis:,.2f}"
-            if precio_analisis is not None
-            else "N/D"
+            f"${precio_analisis:,.2f}" if isinstance(precio_analisis, (int, float)) else "N/D"
         )
     )
 
@@ -3413,9 +3411,7 @@ with c2:
         "Fair Value",
 
         (
-            f"${fair_value:,.2f}"
-            if fair_value is not None
-            else "N/D"
+            f"${fair_value:,.2f}" if isinstance(fair_value, (int, float)) else "N/D" 
         )
     )
 
@@ -3426,9 +3422,7 @@ with c3:
         "Potencial",
 
         (
-            f"{potencial_fair:+.2f}%"
-            if potencial_fair is not None
-            else "N/D"
+            f"{potencial_fair:+.2f}%" if isinstance(potencial_fair, (int, float)) else "N/D"
         )
     )
 
