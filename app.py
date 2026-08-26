@@ -11,7 +11,7 @@ from dcf import (
 )
 
 # =========================================================
-# CONFIGURACIÓN DE PÁGINA Y SESIÓN YFINANCE (EVITAR BLOQUEOS)
+# CONFIGURACIÓN DE PÁGINA
 # =========================================================
 
 st.set_page_config(
@@ -20,17 +20,11 @@ st.set_page_config(
     layout="wide"
 )
 
-# Configurar headers para que Yahoo Finance no bloquee las peticiones
-session = requests.Session()
-session.headers.update({
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-})
-
 st.title("🤖 MARKET AI")
 st.caption("Sistema experimental de análisis técnico, fundamentales, valoración, analistas y mercado.")
 
 # =========================================================
-# FUNCIONES AUXILIARES
+# FUNCIONES AUXILIARES DE LIMPIEZA
 # =========================================================
 
 def limpiar_numero(valor):
@@ -51,7 +45,7 @@ def obtener_valor(diccionario, claves):
     return None
 
 # =========================================================
-# ALPHA VANTAGE
+# OBTENCIÓN DE PRECIO DESDE ALPHA VANTAGE
 # =========================================================
 
 @st.cache_data(ttl=900)
@@ -68,91 +62,90 @@ def obtener_precio_alpha_vantage(ticker):
             "symbol": ticker,
             "apikey": api_key
         }
+
         respuesta = requests.get(url, params=parametros, timeout=15)
         respuesta.raise_for_status()
         datos = respuesta.json()
 
         if "Note" in datos:
-            return None, "Alpha Vantage ha alcanzado el límite de peticiones."
+            return None, "Alpha Vantage ha alcanzado el límite de peticiones (5 por minuto / 500 por día)."
+
         if "Information" in datos:
             return None, datos["Information"]
+
         if "Error Message" in datos:
-            return None, "El ticker no es válido."
+            return None, "El ticker introducido no es válido en Alpha Vantage."
 
         quote = datos.get("Global Quote", {})
         precio = quote.get("05. price")
         fecha = quote.get("07. latest trading day")
 
         if not precio:
-            return None, "Alpha Vantage no ha devuelto el precio."
+            return None, "Alpha Vantage no ha devuelto información para este ticker."
 
-        return {"precio": float(precio), "fecha": fecha}, None
+        return {
+            "precio": float(precio),
+            "fecha": fecha
+        }, None
 
     except Exception as error:
-        return None, str(error)
+        return None, f"Error de conexión con Alpha Vantage: {str(error)}"
 
 # =========================================================
-# HISTÓRICOS Y DATOS ROBUSTOS
+# OBTENCIÓN DE DATOS HISTÓRICOS Y DE MERCADO
 # =========================================================
 
 @st.cache_data(ttl=900)
 def obtener_precios(ticker, periodo):
     try:
-        datos = yf.download(ticker, period=periodo, auto_adjust=False, progress=False, session=session)
+        datos = yf.download(ticker, period=periodo, auto_adjust=False, progress=False)
+
         if datos is None or datos.empty:
             return pd.DataFrame()
 
         if isinstance(datos.columns, pd.MultiIndex):
             datos.columns = datos.columns.get_level_values(0)
 
-        columnas = ["Open", "High", "Low", "Close", "Volume"]
-        disponibles = [columna for columna in columnas if columna in datos.columns]
+        columnas_deseadas = ["Open", "High", "Low", "Close", "Volume"]
+        columnas_existentes = [col for col in columnas_deseadas if col in datos.columns]
 
-        datos = datos[disponibles].copy()
-        return datos.dropna(subset=["Close"])
+        if not columnas_existentes:
+            return pd.DataFrame()
+
+        datos = datos[columnas_existentes].copy()
+        datos = datos.dropna(subset=["Close"])
+
+        return datos
+
     except Exception:
         return pd.DataFrame()
 
 @st.cache_data(ttl=3600)
 def obtener_info(ticker):
     try:
-        empresa = yf.Ticker(ticker, session=session)
+        empresa = yf.Ticker(ticker)
         datos = empresa.info
-        if datos and isinstance(datos, dict) and len(datos) > 5:
-            return datos
-    except Exception:
-        pass
-    
-    # Fallback usando fast_info si .info viene vacio por bloqueo
-    try:
-        empresa = yf.Ticker(ticker, session=session)
-        fast = empresa.fast_info
-        return {
-            "symbol": ticker,
-            "longName": ticker,
-            "lastPrice": fast.get("lastPrice"),
-            "marketCap": fast.get("marketCap"),
-            "sharesOutstanding": fast.get("shares"),
-            "yearHigh": fast.get("yearHigh"),
-            "yearLow": fast.get("yearLow")
-        }
+        return datos if isinstance(datos, dict) else {}
     except Exception:
         return {}
 
 @st.cache_data(ttl=3600)
 def obtener_objetivos_analistas(ticker, info_dict=None):
     try:
-        empresa = yf.Ticker(ticker, session=session)
+        empresa = yf.Ticker(ticker)
         datos = empresa.analyst_price_targets
+
         if datos is not None:
             if hasattr(datos, "to_dict"):
                 datos = datos.to_dict()
+
             if isinstance(datos, dict) and any(v is not None for v in datos.values()):
                 return datos
     except Exception:
         pass
 
     info = info_dict or obtener_info(ticker)
+
     return {
         "low": info.get("targetLowPrice"),
         "mean": info.get("targetMeanPrice"),
@@ -163,7 +156,7 @@ def obtener_objetivos_analistas(ticker, info_dict=None):
 @st.cache_data(ttl=3600)
 def obtener_recomendaciones(ticker):
     try:
-        empresa = yf.Ticker(ticker, session=session)
+        empresa = yf.Ticker(ticker)
         datos = empresa.recommendations_summary
         return datos if datos is not None else pd.DataFrame()
     except Exception:
@@ -172,7 +165,7 @@ def obtener_recomendaciones(ticker):
 @st.cache_data(ttl=3600)
 def obtener_historial_recomendaciones(ticker):
     try:
-        empresa = yf.Ticker(ticker, session=session)
+        empresa = yf.Ticker(ticker)
         datos = empresa.recommendations
         return datos if datos is not None else pd.DataFrame()
     except Exception:
@@ -181,7 +174,7 @@ def obtener_historial_recomendaciones(ticker):
 @st.cache_data(ttl=3600)
 def obtener_upgrades_downgrades(ticker):
     try:
-        empresa = yf.Ticker(ticker, session=session)
+        empresa = yf.Ticker(ticker)
         datos = empresa.upgrades_downgrades
         return datos if datos is not None else pd.DataFrame()
     except Exception:
@@ -190,7 +183,7 @@ def obtener_upgrades_downgrades(ticker):
 @st.cache_data(ttl=3600)
 def obtener_estimaciones_eps(ticker):
     try:
-        empresa = yf.Ticker(ticker, session=session)
+        empresa = yf.Ticker(ticker)
         datos = empresa.earnings_estimate
         return datos if datos is not None else pd.DataFrame()
     except Exception:
@@ -199,7 +192,7 @@ def obtener_estimaciones_eps(ticker):
 @st.cache_data(ttl=3600)
 def obtener_estimaciones_ingresos(ticker):
     try:
-        empresa = yf.Ticker(ticker, session=session)
+        empresa = yf.Ticker(ticker)
         datos = empresa.revenue_estimate
         return datos if datos is not None else pd.DataFrame()
     except Exception:
@@ -208,7 +201,7 @@ def obtener_estimaciones_ingresos(ticker):
 @st.cache_data(ttl=3600)
 def obtener_revisiones_eps(ticker):
     try:
-        empresa = yf.Ticker(ticker, session=session)
+        empresa = yf.Ticker(ticker)
         datos = empresa.eps_revisions
         return datos if datos is not None else pd.DataFrame()
     except Exception:
@@ -217,7 +210,7 @@ def obtener_revisiones_eps(ticker):
 @st.cache_data(ttl=3600)
 def obtener_tendencia_eps(ticker):
     try:
-        empresa = yf.Ticker(ticker, session=session)
+        empresa = yf.Ticker(ticker)
         datos = empresa.eps_trend
         return datos if datos is not None else pd.DataFrame()
     except Exception:
@@ -226,7 +219,7 @@ def obtener_tendencia_eps(ticker):
 @st.cache_data(ttl=3600)
 def obtener_crecimiento_estimado(ticker):
     try:
-        empresa = yf.Ticker(ticker, session=session)
+        empresa = yf.Ticker(ticker)
         datos = empresa.growth_estimates
         return datos if datos is not None else pd.DataFrame()
     except Exception:
@@ -235,7 +228,7 @@ def obtener_crecimiento_estimado(ticker):
 @st.cache_data(ttl=900)
 def obtener_noticias(ticker):
     try:
-        empresa = yf.Ticker(ticker, session=session)
+        empresa = yf.Ticker(ticker)
         noticias = empresa.news
         return noticias if noticias is not None else []
     except Exception:
@@ -257,139 +250,277 @@ def calcular_rsi(precios, periodo=14):
 def calcular_score_tecnico(precio, ma20, ma50, ma200, rsi):
     score = 0
     razones = []
+
     if pd.notna(ma20):
-        if precio > ma20: score += 5; razones.append("El precio está por encima de la MA20.")
-        else: razones.append("El precio está por debajo de la MA20.")
+        if precio > ma20:
+            score += 5
+            razones.append("El precio está por encima de la MA20 (tendencia de muy corto plazo positiva).")
+        else:
+            razones.append("El precio está por debajo de la MA20 (presión vendedora a muy corto plazo).")
+
     if pd.notna(ma20) and pd.notna(ma50):
-        if ma20 > ma50: score += 5; razones.append("La MA20 está por encima de la MA50.")
-        else: razones.append("La MA20 está por debajo de la MA50.")
+        if ma20 > ma50:
+            score += 5
+            razones.append("La MA20 está por encima de la MA50 (inercia alcista de corto plazo).")
+        else:
+            razones.append("La MA20 está por debajo de la MA50 (inercia bajista de corto plazo).")
+
     if pd.notna(ma50) and pd.notna(ma200):
-        if ma50 > ma200: score += 7; razones.append("La MA50 está por encima de la MA200.")
-        else: razones.append("La MA50 está por debajo de la MA200.")
+        if ma50 > ma200:
+            score += 7
+            razones.append("La MA50 está por encima de la MA200 (tendencia principal alcista).")
+        else:
+            razones.append("La MA50 está por debajo de la MA200 (tendencia principal bajista o débil).")
+
     if pd.notna(rsi):
-        if rsi < 30: score += 6; razones.append("El RSI indica posible sobreventa.")
-        elif rsi <= 65: score += 8; razones.append("El RSI se encuentra en una zona equilibrada.")
-        elif rsi <= 70: score += 5; razones.append("El RSI se aproxima a sobrecompra.")
-        else: score += 2; razones.append("El RSI indica posible sobrecompra.")
+        if rsi < 30:
+            score += 6
+            razones.append("El RSI indica sobreventa, lo que puede preceder un rebote técnico.")
+        elif rsi <= 65:
+            score += 8
+            razones.append("El RSI está en zona saludable sin sobrecompra extrema.")
+        elif rsi <= 70:
+            score += 5
+            razones.append("El RSI muestra fuerza pero empieza a acercarse a zona alta.")
+        else:
+            score += 2
+            razones.append("El RSI indica sobrecompra, lo que eleva el riesgo de consolidación.")
+
     return min(score, 25), razones
 
 def calcular_score_valoracion(pe, forward_pe, peg, price_to_book):
     score = 0
     razones = []
+
     if pe is not None:
-        if pe < 15: score += 8; razones.append("PER relativamente bajo.")
-        elif pe < 25: score += 6; razones.append("PER en zona intermedia.")
-        elif pe < 40: score += 3; razones.append("PER relativamente elevado.")
-        else: score += 1; razones.append("PER muy elevado.")
+        if pe < 15:
+            score += 8
+            razones.append("PER por debajo de 15, atractivo en términos históricos generales.")
+        elif pe < 25:
+            score += 6
+            razones.append("PER en un rango moderado (15-25).")
+        elif pe < 40:
+            score += 3
+            razones.append("PER algo exigentemente alto (25-40).")
+        else:
+            score += 1
+            razones.append("PER muy elevado (más de 40), exige alto crecimiento futuro.")
+
     if forward_pe is not None:
-        if forward_pe < 15: score += 7
-        elif forward_pe < 25: score += 5
-        elif forward_pe < 40: score += 2
+        if forward_pe < 15:
+            score += 7
+            razones.append("PER futuro bajo, sugiere valor ajustado por beneficios previstos.")
+        elif forward_pe < 25:
+            score += 5
+            razones.append("PER futuro razonable.")
+        elif forward_pe < 40:
+            score += 2
+            razones.append("PER futuro exigente.")
+        else:
+            score += 1
+            razones.append("PER futuro muy alto.")
+
     if peg is not None:
-        if peg < 1: score += 6
-        elif peg < 2: score += 4
-        else: score += 1
+        if peg < 1:
+            score += 6
+            razones.append("PEG por debajo de 1, valoración muy atractiva ajustada por crecimiento.")
+        elif peg < 2:
+            score += 4
+            razones.append("PEG moderado entre 1 y 2.")
+        else:
+            score += 1
+            razones.append("PEG elevado (más de 2), crecimiento caro.")
+
     if price_to_book is not None:
-        if price_to_book < 2: score += 4
-        elif price_to_book < 5: score += 2
-        else: score += 1
+        if price_to_book < 2:
+            score += 4
+            razones.append("Price/Book bajo.")
+        elif price_to_book < 5:
+            score += 2
+            razones.append("Price/Book en rango medio.")
+        else:
+            score += 1
+            razones.append("Price/Book elevado.")
+
     return min(score, 25), razones
 
 def calcular_score_fundamentales(roe, margen, deuda, flujo_caja):
     score = 0
     razones = []
+
     if roe is not None:
-        if roe > 0.20: score += 8; razones.append("ROE elevado.")
-        elif roe > 0.10: score += 5; razones.append("ROE razonable.")
-        else: score += 2; razones.append("ROE relativamente bajo.")
+        if roe > 0.20:
+            score += 8
+            razones.append("ROE excelente (>20%).")
+        elif roe > 0.10:
+            score += 5
+            razones.append("ROE aceptable (10%-20%).")
+        else:
+            score += 2
+            razones.append("ROE bajo (<10%).")
+
     if margen is not None:
-        if margen > 0.20: score += 7; razones.append("Margen de beneficios elevado.")
-        elif margen > 0.10: score += 5; razones.append("Margen de beneficios razonable.")
-        else: score += 2; razones.append("Margen de beneficios reducido.")
+        if margen > 0.20:
+            score += 7
+            razones.append("Margen neto elevado (>20%).")
+        elif margen > 0.10:
+            score += 5
+            razones.append("Margen neto saludable (10%-20%).")
+        else:
+            score += 2
+            razones.append("Margen neto estrecho (<10%).")
+
     if deuda is not None:
-        if deuda < 50: score += 5; razones.append("Deuda relativamente baja.")
-        elif deuda < 100: score += 3; razones.append("Deuda moderada.")
-        else: score += 1; razones.append("Deuda elevada.")
+        if deuda < 50:
+            score += 5
+            razones.append("Nivel de deuda bajo respecto al patrimonio.")
+        elif deuda < 100:
+            score += 3
+            razones.append("Nivel de deuda moderado.")
+        else:
+            score += 1
+            razones.append("Nivel de deuda alto respecto al patrimonio.")
+
     if flujo_caja is not None:
-        if flujo_caja > 0: score += 5; razones.append("Free Cash Flow positivo.")
-        else: razones.append("Free Cash Flow negativo.")
+        if flujo_caja > 0:
+            score += 5
+            razones.append("Generación de Free Cash Flow positiva.")
+        else:
+            razones.append("Free Cash Flow negativo o no disponible.")
+
     return min(score, 25), razones
 
 def calcular_score_crecimiento(crecimiento_ingresos, crecimiento_beneficios):
     score = 0
     razones = []
+
     if crecimiento_ingresos is not None:
-        if crecimiento_ingresos > 0.15: score += 7
-        elif crecimiento_ingresos > 0.05: score += 5
-        elif crecimiento_ingresos > 0: score += 2
-        else: razones.append("Los ingresos están decreciendo.")
+        if crecimiento_ingresos > 0.15:
+            score += 7
+            razones.append("Fuerte crecimiento de ingresos (>15%).")
+        elif crecimiento_ingresos > 0.05:
+            score += 5
+            razones.append("Crecimiento de ingresos moderado (5%-15%).")
+        elif crecimiento_ingresos > 0:
+            score += 2
+            razones.append("Crecimiento de ingresos positivo pero débil.")
+        else:
+            razones.append("Ingresos en retroceso.")
+
     if crecimiento_beneficios is not None:
-        if crecimiento_beneficios > 0.15: score += 8
-        elif crecimiento_beneficios > 0.05: score += 5
-        elif crecimiento_beneficios > 0: score += 2
-        else: razones.append("Los beneficios están decreciendo.")
+        if crecimiento_beneficios > 0.15:
+            score += 8
+            razones.append("Fuerte crecimiento de beneficios (>15%).")
+        elif crecimiento_beneficios > 0.05:
+            score += 5
+            razones.append("Crecimiento de beneficios moderado (5%-15%).")
+        elif crecimiento_beneficios > 0:
+            score += 2
+            razones.append("Crecimiento de beneficios positivo pero débil.")
+        else:
+            razones.append("Beneficios en retroceso.")
+
     return min(score, 15), razones
 
 def calcular_score_riesgo(volatilidad, deuda):
     score = 0
     razones = []
-    if volatilidad < 20: score += 6
-    elif volatilidad < 35: score += 4
-    elif volatilidad < 50: score += 2
-    else: score += 1; razones.append("Volatilidad muy elevada.")
+
+    if volatilidad < 20:
+        score += 6
+        razones.append("Volatilidad baja para los estándares de renta variable.")
+    elif volatilidad < 35:
+        score += 4
+        razones.append("Volatilidad moderada.")
+    elif volatilidad < 50:
+        score += 2
+        razones.append("Volatilidad alta.")
+    else:
+        score += 1
+        razones.append("Volatilidad muy elevada.")
+
     if deuda is not None:
-        if deuda < 50: score += 4
-        elif deuda < 100: score += 2
-        else: score += 1
-    else: score += 2
+        if deuda < 50:
+            score += 4
+            razones.append("Riesgo financiero bajo por endeudamiento.")
+        elif deuda < 100:
+            score += 2
+            razones.append("Riesgo financiero moderado por endeudamiento.")
+        else:
+            score += 1
+            razones.append("Riesgo financiero más elevado por deuda.")
+    else:
+        score += 2
+
     return min(score, 10), razones
 
 # =========================================================
-# VALORACIÓN COMBINADA & PREDICTIVO
+# VALORACIÓN COMBINADA & MODELO PREDICTIVO
 # =========================================================
 
 def calcular_fair_value_combinado(precio_actual, valor_dcf, objetivo_analistas, eps, crecimiento_beneficios):
     valores = []
     pesos = []
+
     if valor_dcf is not None and valor_dcf > 0:
         valores.append(float(valor_dcf))
         pesos.append(0.50)
+
     if objetivo_analistas is not None and objetivo_analistas > 0:
         valores.append(float(objetivo_analistas))
         pesos.append(0.25)
+
     if eps is not None and eps > 0:
         crecimiento_pct = float(crecimiento_beneficios) * 100 if crecimiento_beneficios is not None else 5.0
         crecimiento_pct = max(-5.0, min(25.0, crecimiento_pct))
         pe_razonable = max(10.0, min(30.0, 15.0 + (0.50 * crecimiento_pct)))
+
         valor_multiplo = eps * pe_razonable
         if valor_multiplo > 0:
             valores.append(float(valor_multiplo))
             pesos.append(0.25)
+
     if not valores:
         return None
-    return sum(v * p for v, p in zip(valores, pesos)) / sum(pesos)
+
+    suma_pesos = sum(pesos)
+    fair_value = sum(v * p for v, p in zip(valores, pesos)) / suma_pesos
+    return fair_value
 
 def diagnosticar_fair_value(precio_actual, fair_value):
     if precio_actual is None or fair_value is None or precio_actual <= 0:
         return "⚪ SIN DATOS", None
+
     potencial = ((fair_value - precio_actual) / precio_actual) * 100
-    if potencial >= 30: return "🟢 MUY INFRAVALORADA", potencial
-    if potencial >= 15: return "🟢 INFRAVALORADA", potencial
-    if potencial >= -10: return "🟡 VALORACIÓN RAZONABLE", potencial
-    if potencial >= -25: return "🟠 SOBREVALORADA", potencial
-    return "🔴 MUY SOBREVALORADA", potencial
+
+    if potencial >= 30:
+        return "🟢 MUY INFRAVALORADA", potencial
+    elif potencial >= 15:
+        return "🟢 INFRAVALORADA", potencial
+    elif potencial >= -10:
+        return "🟡 VALORACIÓN RAZONABLE", potencial
+    elif potencial >= -25:
+        return "🟠 SOBREVALORADA", potencial
+    else:
+        return "🔴 MUY SOBREVALORADA", potencial
 
 def calcular_diagnostico_predictivo(precio, fair_value, score_total, score_tecnico, score_valoracion, score_fundamentales, score_crecimiento, score_riesgo, rsi, ma20, ma50, ma200, objetivo_analistas=None):
-    señales, riesgos = [], []
-    potencial_fair = None
+    señales = []
+    riesgos = []
+
     if precio is not None and fair_value is not None and precio > 0:
         potencial_fair = ((fair_value - precio) / precio) * 100
-        if potencial_fair >= 20: señales.append("La acción presenta un descuento importante respecto al Fair Value.")
-        elif potencial_fair >= 10: señales.append("La acción presenta un descuento moderado respecto al Fair Value.")
-        elif potencial_fair <= -20: riesgos.append("El precio está muy por encima del Fair Value estimado.")
-        elif potencial_fair <= -10: riesgos.append("El precio está por encima del Fair Value estimado.")
+        if potencial_fair >= 20:
+            señales.append("La acción presenta un descuento importante respecto al Fair Value.")
+        elif potencial_fair >= 10:
+            señales.append("La acción presenta un descuento moderado respecto al Fair Value.")
+        elif potencial_fair <= -20:
+            riesgos.append("El precio está muy por encima del Fair Value estimado.")
+        elif potencial_fair <= -10:
+            riesgos.append("El precio está por encima del Fair Value estimado.")
+    else:
+        potencial_fair = None
 
-    tendencia = "LATERAL"
     if ma20 is not None and ma50 is not None and ma200 is not None:
         if precio > ma20 and ma20 > ma50 and ma50 > ma200:
             tendencia = "ALCISTA"
@@ -397,42 +528,87 @@ def calcular_diagnostico_predictivo(precio, fair_value, score_total, score_tecni
         elif precio < ma20 and ma20 < ma50 and ma50 < ma200:
             tendencia = "BAJISTA"
             riesgos.append("Las medias móviles muestran una estructura bajista.")
+        else:
+            tendencia = "LATERAL"
+    else:
+        tendencia = "INCIERTA"
 
-    situacion_rsi = "NEUTRAL"
     if rsi is not None:
-        if rsi >= 75: situacion_rsi = "SOBRECOMPRA"; riesgos.append("El RSI indica una situación de sobrecompra.")
-        elif rsi <= 30: situacion_rsi = "SOBREVENTA"; señales.append("El RSI indica una situación de sobreventa.")
-        elif 45 <= rsi <= 70: situacion_rsi = "SALUDABLE"
+        if rsi >= 75:
+            situacion_rsi = "SOBRECOMPRA"
+            riesgos.append("El RSI indica una situación de sobrecompra.")
+        elif rsi <= 30:
+            situacion_rsi = "SOBREVENTA"
+            señales.append("El RSI indica una situación de sobreventa.")
+        elif 45 <= rsi <= 70:
+            situacion_rsi = "SALUDABLE"
+        else:
+            situacion_rsi = "NEUTRAL"
+    else:
+        situacion_rsi = "N/D"
 
-    if score_fundamentales >= 20: señales.append("Los fundamentales son sólidos.")
-    elif score_fundamentales < 12: riesgos.append("Los fundamentales presentan varias señales débiles.")
-    if score_crecimiento >= 12: señales.append("El crecimiento de ingresos y beneficios es favorable.")
-    elif score_crecimiento < 7: riesgos.append("El crecimiento de la empresa es limitado o débil.")
+    if score_fundamentales >= 20:
+        señales.append("Los fundamentales son sólidos.")
+    elif score_fundamentales < 12:
+        riesgos.append("Los fundamentales presentan varias señales débiles.")
 
-    potencial_analistas = ((objetivo_analistas - precio) / precio) * 100 if objetivo_analistas and precio else None
+    if score_crecimiento >= 12:
+        señales.append("El crecimiento de ingresos y beneficios es favorable.")
+    elif score_crecimiento < 7:
+        riesgos.append("El crecimiento de la empresa es limitado o débil.")
 
-    puntos_alcistas = (3 if tendencia == "ALCISTA" else 0) + (3 if potencial_fair and potencial_fair >= 15 else 0) + (2 if score_fundamentales >= 20 else 0)
-    puntos_bajistas = (3 if tendencia == "BAJISTA" else 0) + (3 if potencial_fair and potencial_fair <= -15 else 0) + (2 if score_fundamentales < 12 else 0)
+    if objetivo_analistas is not None and precio is not None and precio > 0:
+        potencial_analistas = ((objetivo_analistas - precio) / precio) * 100
+    else:
+        potencial_analistas = None
 
-    if puntos_alcistas >= puntos_bajistas + 3: direccion = "🟢 ALCISTA"
-    elif puntos_bajistas >= puntos_alcistas + 3: direccion = "🔴 BAJISTA"
-    else: direccion = "🟡 LATERAL / INCIERTA"
+    puntos_alcistas = 0
+    puntos_bajistas = 0
 
-    if score_total >= 85: señal = "🟢 COMPRA"
-    elif score_total >= 70: señal = "🟢 COMPRA MODERADA"
-    elif score_total >= 55: señal = "🟡 MANTENER"
-    elif score_total >= 40: señal = "🟠 ESPERAR"
-    else: señal = "🔴 EVITAR"
+    if tendencia == "ALCISTA": puntos_alcistas += 3
+    elif tendencia == "BAJISTA": puntos_bajistas += 3
+
+    if potencial_fair is not None:
+        if potencial_fair >= 15: puntos_alcistas += 3
+        elif potencial_fair <= -15: puntos_bajistas += 3
+
+    if score_fundamentales >= 20: puntos_alcistas += 2
+    elif score_fundamentales < 12: puntos_bajistas += 2
+
+    if puntos_alcistas >= puntos_bajistas + 3:
+        direccion = "🟢 ALCISTA"
+    elif puntos_bajistas >= puntos_alcistas + 3:
+        direccion = "🔴 BAJISTA"
+    else:
+        direccion = "🟡 LATERAL / INCIERTA"
+
+    if score_total >= 85:
+        señal = "🟢 COMPRA"
+    elif score_total >= 70:
+        señal = "🟢 COMPRA MODERADA"
+    elif score_total >= 55:
+        señal = "🟡 MANTENER"
+    elif score_total >= 40:
+        señal = "🟠 ESPERAR"
+    else:
+        señal = "🔴 EVITAR"
 
     return {
-        "direccion": direccion, "tendencia": tendencia, "rsi": situacion_rsi,
-        "horizonte": "3–12 meses", "señal": señal, "potencial_fair": potencial_fair,
-        "potencial_analistas": potencial_analistas, "señales": señales, "riesgos": riesgos,
-        "puntos_alcistas": puntos_alcistas, "puntos_bajistas": puntos_bajistas
+        "direccion": direccion,
+        "tendencia": tendencia,
+        "rsi": situacion_rsi,
+        "horizonte": "3–12 meses",
+        "señal": señal,
+        "potencial_fair": potencial_fair,
+        "potencial_analistas": potencial_analistas,
+        "señales": señales,
+        "riesgos": riesgos,
+        "puntos_alcistas": puntos_alcistas,
+        "puntos_bajistas": puntos_bajistas
     }
 
 # =========================================================
-# INTERFAZ (SIDEBAR)
+# BARRA LATERAL
 # =========================================================
 
 st.sidebar.header("⚙️ Configuración")
@@ -447,7 +623,7 @@ precio_personalizado = st.sidebar.number_input("Precio de entrada", min_value=0.
 analizar = st.sidebar.button("📊 ANALIZAR", type="primary")
 
 # =========================================================
-# ANÁLISIS DE TICKER
+# ANÁLISIS PRINCIPAL
 # =========================================================
 
 if analizar:
@@ -477,56 +653,50 @@ if analizar:
     precio_historico = float(datos["Close"].iloc[-1])
     precio_anterior = float(datos["Close"].iloc[-2]) if len(datos) > 1 else precio_historico
     variacion = ((precio_historico - precio_anterior) / precio_anterior) * 100
+
     precio_analisis = precio_personalizado if tipo_precio == "Precio personalizado" else (precio_mercado or precio_historico)
 
-    # Indicadores Técnicos
+    # Indicadores técnicos
     datos["MA20"] = datos["Close"].rolling(20).mean()
     datos["MA50"] = datos["Close"].rolling(50).mean()
     datos["MA200"] = datos["Close"].rolling(200).mean()
-    ma20, ma50, ma200 = datos["MA20"].iloc[-1], datos["MA50"].iloc[-1], datos["MA200"].iloc[-1]
+
+    ma20 = datos["MA20"].iloc[-1]
+    ma50 = datos["MA50"].iloc[-1]
+    ma200 = datos["MA200"].iloc[-1]
+
     datos["RSI"] = calcular_rsi(datos["Close"])
     rsi = float(datos["RSI"].iloc[-1])
+
     volatilidad = datos["Close"].pct_change().std() * np.sqrt(252) * 100
 
-    # Extraer variables con Múltiples Respaldos
-    empresa_obj = yf.Ticker(ticker, session=session)
-    fast_info = getattr(empresa_obj, "fast_info", {})
-
+    # Extraer variables clave de info
     nombre = info.get("longName") or info.get("shortName") or ticker
     sector = info.get("sector", "N/D")
     industria = info.get("industry", "N/D")
-    
+
     pe = limpiar_numero(info.get("trailingPE"))
     forward_pe = limpiar_numero(info.get("forwardPE"))
     peg = limpiar_numero(info.get("pegRatio"))
     price_to_book = limpiar_numero(info.get("priceToBook"))
+
     roe = limpiar_numero(info.get("returnOnEquity"))
     margen = limpiar_numero(info.get("profitMargins"))
     margen_operativo = limpiar_numero(info.get("operatingMargins"))
     deuda = limpiar_numero(info.get("debtToEquity"))
-    deuda_total = limpiar_numero(info.get("totalDebt"))
-    caja_total = limpiar_numero(info.get("totalCash"))
-    
-    acciones_en_circulacion = limpiar_numero(info.get("sharesOutstanding")) or limpiar_numero(fast_info.get("shares"))
+
+    flujo_caja = limpiar_numero(info.get("freeCashflow"))
     ingresos = limpiar_numero(info.get("totalRevenue"))
     beneficio = limpiar_numero(info.get("netIncomeToCommon"))
     eps = limpiar_numero(info.get("trailingEps"))
+
     crecimiento_ingresos = limpiar_numero(info.get("revenueGrowth"))
     crecimiento_beneficios = limpiar_numero(info.get("earningsGrowth"))
     dividend_yield = limpiar_numero(info.get("dividendYield"))
 
-    # Extraer Free Cash Flow directo o desde el Estado Financiero (Cashflow)
-    flujo_caja = limpiar_numero(info.get("freeCashflow"))
-    if flujo_caja is None:
-        try:
-            cf_df = empresa_obj.cashflow
-            if cf_df is not None and not cf_df.empty:
-                if "Free Cash Flow" in cf_df.index:
-                    flujo_caja = float(cf_df.loc["Free Cash Flow"].iloc[0])
-                elif "Operating Cash Flow" in cf_df.index and "Capital Expenditure" in cf_df.index:
-                    flujo_caja = float(cf_df.loc["Operating Cash Flow"].iloc[0]) + float(cf_df.loc["Capital Expenditure"].iloc[0])
-        except Exception:
-            flujo_caja = None
+    deuda_total = limpiar_numero(info.get("totalDebt"))
+    caja_total = limpiar_numero(info.get("totalCash"))
+    acciones_en_circulacion = limpiar_numero(info.get("sharesOutstanding"))
 
     # Scores
     score_tecnico, razones_tecnico = calcular_score_tecnico(precio_historico, ma20, ma50, ma200, rsi)
@@ -534,9 +704,10 @@ if analizar:
     score_fundamentales, razones_fundamentales = calcular_score_fundamentales(roe, margen, deuda, flujo_caja)
     score_crecimiento, razones_crecimiento = calcular_score_crecimiento(crecimiento_ingresos, crecimiento_beneficios)
     score_riesgo, razones_riesgo = calcular_score_riesgo(volatilidad, deuda)
+
     score_total = score_tecnico + score_valoracion + score_fundamentales + score_crecimiento + score_riesgo
 
-    # Renderizado UI
+    # UI
     st.success(f"✅ {nombre}")
     st.write(f"**Sector:** {sector}  |  **Industria:** {industria}")
 
@@ -593,34 +764,32 @@ if analizar:
     with c3: st.metric("Mediana", f"${objetivo_mediano:,.2f}" if objetivo_mediano else "N/D")
     with c4: st.metric("Objetivo alto", f"${objetivo_alto:,.2f}" if objetivo_alto else "N/D")
 
-    # Consenso Buy / Sell
     st.subheader("🧑‍💼 Consenso de analistas")
     if not recomendaciones.empty:
         st.dataframe(recomendaciones, use_container_width=True)
     else:
         st.info("No hay resumen de recomendaciones disponible.")
 
-    # Upgrades / Downgrades
     st.subheader("🔄 Cambios recientes de analistas")
     if not upgrades.empty:
         st.dataframe(upgrades.tail(10).reset_index(), use_container_width=True, hide_index=True)
     else:
         st.info("No hay cambios recientes disponibles.")
 
-    # Estimaciones
     st.divider()
     st.header("🔮 Estimaciones de analistas")
     if not eps_estimaciones.empty:
         st.subheader("EPS Estimados")
         st.dataframe(eps_estimaciones, use_container_width=True)
+
     if not ingresos_estimaciones.empty:
         st.subheader("Ingresos Estimados")
         st.dataframe(ingresos_estimaciones, use_container_width=True)
 
-    # DCF y Fair Value
     st.divider()
     st.header("💎 Valoración DCF")
     valor_base = None
+
     if flujo_caja and flujo_caja > 0 and acciones_en_circulacion:
         escenarios_dcf = calcular_escenarios_dcf(
             free_cash_flow=flujo_caja,
@@ -640,33 +809,57 @@ if analizar:
 
     st.divider()
     st.header("💠 MARKET AI FAIR VALUE")
-    fair_value = calcular_fair_value_combinado(precio_analisis, valor_base, objetivo_medio, eps, crecimiento_beneficios)
+    fair_value = calcular_fair_value_combinado(
+        precio_actual=precio_analisis,
+        valor_dcf=valor_base,
+        objetivo_analistas=objetivo_medio,
+        eps=eps,
+        crecimiento_beneficios=crecimiento_beneficios
+    )
+
     estado_fair, potencial_fair = diagnosticar_fair_value(precio_analisis, fair_value)
 
     c1, c2, c3 = st.columns(3)
     with c1: st.metric("Precio actual", f"${precio_analisis:,.2f}")
     with c2: st.metric("Fair Value", f"${fair_value:,.2f}" if fair_value else "N/D")
     with c3: st.metric("Potencial", f"{potencial_fair:+.2f}%" if potencial_fair else "N/D")
+
     st.write(f"### {estado_fair}")
 
-    # Predictivo
     st.divider()
     st.header("🔮 Diagnóstico predictivo MARKET AI")
     diagnostico = calcular_diagnostico_predictivo(
-        precio_analisis, fair_value, score_total, score_tecnico,
-        score_valoracion, score_fundamentales, score_crecimiento, score_riesgo,
-        rsi, ma20, ma50, ma200, objetivo_medio
+        precio=precio_analisis,
+        fair_value=fair_value,
+        score_total=score_total,
+        score_tecnico=score_tecnico,
+        score_valoracion=score_valoracion,
+        score_fundamentales=score_fundamentales,
+        score_crecimiento=score_crecimiento,
+        score_riesgo=score_riesgo,
+        rsi=rsi,
+        ma20=ma20,
+        ma50=ma50,
+        ma200=ma200,
+        objetivo_analistas=objetivo_medio
     )
+
     col1, col2, col3 = st.columns(3)
     with col1: st.metric("Dirección Probable", diagnostico["direccion"])
     with col2: st.metric("Señal", diagnostico["señal"])
     with col3: st.metric("Horizonte", diagnostico["horizonte"])
 
-    # Gráfico
     st.divider()
     st.header("📈 Gráfico")
     figura = go.Figure()
-    figura.add_trace(go.Candlestick(x=datos.index, open=datos["Open"], high=datos["High"], low=datos["Low"], close=datos["Close"], name=ticker))
+    figura.add_trace(go.Candlestick(
+        x=datos.index,
+        open=datos["Open"],
+        high=datos["High"],
+        low=datos["Low"],
+        close=datos["Close"],
+        name=ticker
+    ))
     figura.add_trace(go.Scatter(x=datos.index, y=datos["MA20"], name="MA20"))
     figura.add_trace(go.Scatter(x=datos.index, y=datos["MA50"], name="MA50"))
     figura.add_trace(go.Scatter(x=datos.index, y=datos["MA200"], name="MA200"))
