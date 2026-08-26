@@ -59,842 +59,8 @@ def obtener_valor(diccionario, claves):
 # ALPHA VANTAGE
 # =========================================================
 
-# =========================================================
-# INFORMACIÓN FINANCIERA ROBUSTA
-# =========================================================
-
-# =========================================================
-# OBJETIVOS DE ANALISTAS — MULTIFUENTE
-# =========================================================
-
 @st.cache_data(ttl=3600)
-def obtener_objetivos_analistas(ticker):
-
-    resultado = {}
-
-
-    try:
-
-        empresa = yf.Ticker(ticker)
-
-
-        # -------------------------------------------------
-        # MÉTODO 1
-        # -------------------------------------------------
-
-        try:
-
-            datos = (
-                empresa.get_analyst_price_targets()
-            )
-
-            if datos is not None:
-
-                if hasattr(
-                    datos,
-                    "to_dict"
-                ):
-
-                    datos = (
-                        datos.to_dict()
-                    )
-
-
-                if isinstance(
-                    datos,
-                    dict
-                ):
-
-                    resultado.update(
-                        datos
-                    )
-
-        except Exception:
-            pass
-
-
-        # -------------------------------------------------
-        # MÉTODO 2
-        # -------------------------------------------------
-
-        try:
-
-            datos = (
-                empresa.analyst_price_targets
-            )
-
-            if datos is not None:
-
-                if hasattr(
-                    datos,
-                    "to_dict"
-                ):
-
-                    datos = (
-                        datos.to_dict()
-                    )
-
-
-                if isinstance(
-                    datos,
-                    dict
-                ):
-
-                    for clave, valor in datos.items():
-
-                        if (
-                            clave
-                            not in resultado
-                            or resultado.get(
-                                clave
-                            ) is None
-                        ):
-
-                            resultado[
-                                clave
-                            ] = valor
-
-        except Exception:
-            pass
-
-
-        # -------------------------------------------------
-        # MÉTODO 3 — INFO
-        # -------------------------------------------------
-
-        try:
-
-            info = obtener_info(
-                ticker
-            )
-
-
-            equivalencias = {
-
-                "low":
-                    "targetLowPrice",
-
-                "mean":
-                    "targetMeanPrice",
-
-                "median":
-                    "targetMedianPrice",
-
-                "high":
-                    "targetHighPrice"
-
-            }
-
-
-            for destino, origen in equivalencias.items():
-
-                if (
-                    destino
-                    not in resultado
-                    or resultado.get(
-                        destino
-                    ) is None
-                ):
-
-                    valor = (
-                        limpiar_numero(
-                            info.get(
-                                origen
-                            )
-                        )
-                    )
-
-
-                    if valor is not None:
-
-                        resultado[
-                            destino
-                        ] = valor
-
-        except Exception:
-            pass
-
-
-    except Exception:
-        pass
-
-
-    return resultado
-
-    info = {}
-
-    try:
-
-        empresa = yf.Ticker(ticker)
-
-        # -------------------------------------------------
-        # 1. INFO GENERAL
-        # -------------------------------------------------
-
-        try:
-
-            datos_info = empresa.info
-
-            if isinstance(
-                datos_info,
-                dict
-            ):
-
-                info.update(
-                    datos_info
-                )
-
-        except Exception:
-            pass
-
-
-        # -------------------------------------------------
-        # 2. FAST INFO
-        # -------------------------------------------------
-
-        try:
-
-            fast = empresa.fast_info
-
-            if fast:
-
-                mapa_fast = {
-
-                    "currentPrice":
-                        "last_price",
-
-                    "marketCap":
-                        "market_cap",
-
-                    "sharesOutstanding":
-                        "shares"
-
-                }
-
-
-                for destino, origen in mapa_fast.items():
-
-                    if (
-                        destino
-                        not in info
-                        or info.get(destino) is None
-                    ):
-
-                        try:
-
-                            valor = getattr(
-                                fast,
-                                origen,
-                                None
-                            )
-
-                            if valor is not None:
-
-                                info[destino] = valor
-
-                        except Exception:
-                            pass
-
-        except Exception:
-            pass
-
-
-        # -------------------------------------------------
-        # 3. CUENTA DE RESULTADOS
-        # -------------------------------------------------
-
-        try:
-
-            income = (
-                empresa.get_income_stmt(
-                    freq="yearly"
-                )
-            )
-
-
-            if (
-                income is not None
-                and not income.empty
-            ):
-
-                ultima_columna = (
-                    income.columns[0]
-                )
-
-
-                def fila_income(
-                    nombres
-                ):
-
-                    for nombre in nombres:
-
-                        if nombre in income.index:
-
-                            valor = (
-                                income
-                                .loc[
-                                    nombre,
-                                    ultima_columna
-                                ]
-                            )
-
-                            valor = (
-                                limpiar_numero(
-                                    valor
-                                )
-                            )
-
-                            if valor is not None:
-
-                                return valor
-
-                    return None
-
-
-                if info.get(
-                    "totalRevenue"
-                ) is None:
-
-                    valor = fila_income(
-                        [
-                            "TotalRevenue",
-                            "OperatingRevenue"
-                        ]
-                    )
-
-                    if valor is not None:
-
-                        info[
-                            "totalRevenue"
-                        ] = valor
-
-
-                if info.get(
-                    "netIncomeToCommon"
-                ) is None:
-
-                    valor = fila_income(
-                        [
-                            "NetIncomeCommonStockholders",
-                            "NetIncome",
-                            "NetIncomeIncludingNoncontrollingInterests"
-                        ]
-                    )
-
-                    if valor is not None:
-
-                        info[
-                            "netIncomeToCommon"
-                        ] = valor
-
-
-                if info.get(
-                    "operatingIncome"
-                ) is None:
-
-                    valor = fila_income(
-                        [
-                            "OperatingIncome"
-                        ]
-                    )
-
-                    if valor is not None:
-
-                        info[
-                            "operatingIncome"
-                        ] = valor
-
-
-                if info.get(
-                    "grossProfit"
-                ) is None:
-
-                    valor = fila_income(
-                        [
-                            "GrossProfit"
-                        ]
-                    )
-
-                    if valor is not None:
-
-                        info[
-                            "grossProfit"
-                        ] = valor
-
-
-        except Exception:
-            pass
-
-
-        # -------------------------------------------------
-        # 4. BALANCE
-        # -------------------------------------------------
-
-        try:
-
-            balance = (
-                empresa.get_balance_sheet(
-                    freq="yearly"
-                )
-            )
-
-
-            if (
-                balance is not None
-                and not balance.empty
-            ):
-
-                ultima_columna = (
-                    balance.columns[0]
-                )
-
-
-                def fila_balance(
-                    nombres
-                ):
-
-                    for nombre in nombres:
-
-                        if nombre in balance.index:
-
-                            valor = (
-                                balance
-                                .loc[
-                                    nombre,
-                                    ultima_columna
-                                ]
-                            )
-
-                            valor = (
-                                limpiar_numero(
-                                    valor
-                                )
-                            )
-
-                            if valor is not None:
-
-                                return valor
-
-                    return None
-
-
-                if info.get(
-                    "totalDebt"
-                ) is None:
-
-                    valor = fila_balance(
-                        [
-                            "TotalDebt",
-                            "TotalLiabilitiesNetMinorityInterest"
-                        ]
-                    )
-
-                    if valor is not None:
-
-                        info[
-                            "totalDebt"
-                        ] = valor
-
-
-                if info.get(
-                    "totalCash"
-                ) is None:
-
-                    valor = fila_balance(
-                        [
-                            "CashCashEquivalentsAndShortTermInvestments",
-                            "CashAndCashEquivalents"
-                        ]
-                    )
-
-                    if valor is not None:
-
-                        info[
-                            "totalCash"
-                        ] = valor
-
-
-                if info.get(
-                    "stockholdersEquity"
-                ) is None:
-
-                    valor = fila_balance(
-                        [
-                            "StockholdersEquity",
-                            "CommonStockEquity"
-                        ]
-                    )
-
-                    if valor is not None:
-
-                        info[
-                            "stockholdersEquity"
-                        ] = valor
-
-
-        except Exception:
-            pass
-
-
-        # -------------------------------------------------
-        # 5. CASH FLOW
-        # -------------------------------------------------
-
-        try:
-
-            cashflow = (
-                empresa.get_cash_flow(
-                    freq="yearly"
-                )
-            )
-
-
-            if (
-                cashflow is not None
-                and not cashflow.empty
-            ):
-
-                ultima_columna = (
-                    cashflow.columns[0]
-                )
-
-
-                def fila_cashflow(
-                    nombres
-                ):
-
-                    for nombre in nombres:
-
-                        if nombre in cashflow.index:
-
-                            valor = (
-                                cashflow
-                                .loc[
-                                    nombre,
-                                    ultima_columna
-                                ]
-                            )
-
-                            valor = (
-                                limpiar_numero(
-                                    valor
-                                )
-                            )
-
-                            if valor is not None:
-
-                                return valor
-
-                    return None
-
-
-                if info.get(
-                    "freeCashflow"
-                ) is None:
-
-                    flujo_operativo = (
-                        fila_cashflow(
-                            [
-                                "OperatingCashFlow",
-                                "TotalCashFromOperatingActivities"
-                            ]
-                        )
-                    )
-
-
-                    capex = (
-                        fila_cashflow(
-                            [
-                                "CapitalExpenditure",
-                                "CapitalExpenditures"
-                            ]
-                        )
-                    )
-
-
-                    if (
-                        flujo_operativo
-                        is not None
-                    ):
-
-                        if capex is None:
-
-                            capex = 0
-
-
-                        info[
-                            "freeCashflow"
-                        ] = (
-                            flujo_operativo
-                            + capex
-                        )
-
-
-        except Exception:
-            pass
-
-
-        # -------------------------------------------------
-        # 6. ACCIONES
-        # -------------------------------------------------
-
-        if info.get(
-            "sharesOutstanding"
-        ) is None:
-
-            try:
-
-                shares = (
-                    empresa.get_shares_full(
-                        start="2024-01-01"
-                    )
-                )
-
-
-                if (
-                    shares is not None
-                    and not shares.empty
-                ):
-
-                    valor = (
-                        limpiar_numero(
-                            shares.iloc[-1]
-                        )
-                    )
-
-
-                    if valor is not None:
-
-                        info[
-                            "sharesOutstanding"
-                        ] = valor
-
-            except Exception:
-                pass
-
-
-        # -------------------------------------------------
-        # 7. CALCULOS SI FALTAN DATOS
-        # -------------------------------------------------
-
-        precio = (
-            limpiar_numero(
-                info.get(
-                    "currentPrice"
-                )
-            )
-        )
-
-
-        if precio is None:
-
-            precio = (
-                limpiar_numero(
-                    info.get(
-                        "regularMarketPrice"
-                    )
-                )
-            )
-
-
-        # EPS
-        eps = (
-            limpiar_numero(
-                info.get(
-                    "trailingEps"
-                )
-            )
-        )
-
-
-        if (
-            eps is None
-            and precio is not None
-            and info.get(
-                "trailingPE"
-            ) is not None
-        ):
-
-            pe = limpiar_numero(
-                info.get(
-                    "trailingPE"
-                )
-            )
-
-            if (
-                pe is not None
-                and pe != 0
-            ):
-
-                info[
-                    "trailingEps"
-                ] = precio / pe
-
-
-        # -------------------------------------------------
-        # 8. MARGEN DE BENEFICIO
-        # -------------------------------------------------
-
-        if info.get(
-            "profitMargins"
-        ) is None:
-
-            ingresos = (
-                limpiar_numero(
-                    info.get(
-                        "totalRevenue"
-                    )
-                )
-            )
-
-            beneficio = (
-                limpiar_numero(
-                    info.get(
-                        "netIncomeToCommon"
-                    )
-                )
-            )
-
-
-            if (
-                ingresos
-                and beneficio is not None
-                and ingresos != 0
-            ):
-
-                info[
-                    "profitMargins"
-                ] = (
-                    beneficio
-                    / ingresos
-                )
-
-
-        # -------------------------------------------------
-        # 9. MARGEN OPERATIVO
-        # -------------------------------------------------
-
-        if info.get(
-            "operatingMargins"
-        ) is None:
-
-            ingresos = (
-                limpiar_numero(
-                    info.get(
-                        "totalRevenue"
-                    )
-                )
-            )
-
-            operating = (
-                limpiar_numero(
-                    info.get(
-                        "operatingIncome"
-                    )
-                )
-            )
-
-
-            if (
-                ingresos
-                and operating is not None
-                and ingresos != 0
-            ):
-
-                info[
-                    "operatingMargins"
-                ] = (
-                    operating
-                    / ingresos
-                )
-
-
-        # -------------------------------------------------
-        # 10. ROE
-        # -------------------------------------------------
-
-        if info.get(
-            "returnOnEquity"
-        ) is None:
-
-            beneficio = (
-                limpiar_numero(
-                    info.get(
-                        "netIncomeToCommon"
-                    )
-                )
-            )
-
-            equity = (
-                limpiar_numero(
-                    info.get(
-                        "stockholdersEquity"
-                    )
-                )
-            )
-
-
-            if (
-                beneficio is not None
-                and equity is not None
-                and equity != 0
-            ):
-
-                info[
-                    "returnOnEquity"
-                ] = (
-                    beneficio
-                    / equity
-                )
-
-
-        # -------------------------------------------------
-        # 11. DEUDA/PATRIMONIO
-        # -------------------------------------------------
-
-        if info.get(
-            "debtToEquity"
-        ) is None:
-
-            deuda = (
-                limpiar_numero(
-                    info.get(
-                        "totalDebt"
-                    )
-                )
-            )
-
-            equity = (
-                limpiar_numero(
-                    info.get(
-                        "stockholdersEquity"
-                    )
-                )
-            )
-
-
-            if (
-                deuda is not None
-                and equity is not None
-                and equity != 0
-            ):
-
-                info[
-                    "debtToEquity"
-                ] = (
-                    deuda
-                    / equity
-                    * 100
-                )
-
-
-        return info
-
-
-    except Exception:
-
-        return info
-
+def obtener_precio_alpha_vantage(ticker, api_key="DEMO"):
     try:
         url = "https://www.alphavantage.co/query"
         parametros = {
@@ -911,28 +77,20 @@ def obtener_objetivos_analistas(ticker):
         datos = respuesta.json()
 
         if "Note" in datos:
-            return None, (
-                "Alpha Vantage ha alcanzado "
-                "el límite de peticiones."
-            )
+            return None, "Alpha Vantage ha alcanzado el límite de peticiones."
 
         if "Information" in datos:
             return None, datos["Information"]
 
         if "Error Message" in datos:
-            return None, (
-                "El ticker no es válido."
-            )
+            return None, "El ticker no es válido."
 
         quote = datos.get("Global Quote", {})
         precio = quote.get("05. price")
         fecha = quote.get("07. latest trading day")
 
         if not precio:
-            return None, (
-                "Alpha Vantage no ha devuelto "
-                "el precio."
-            )
+            return None, "Alpha Vantage no ha devuelto el precio."
 
         return {
             "precio": float(precio),
@@ -941,6 +99,232 @@ def obtener_objetivos_analistas(ticker):
 
     except Exception as error:
         return None, str(error)
+
+# =========================================================
+# INFORMACIÓN GENERAL Y ROBUSTA
+# =========================================================
+
+@st.cache_data(ttl=3600)
+def obtener_info(ticker):
+    info = {}
+    try:
+        empresa = yf.Ticker(ticker)
+
+        # 1. INFO GENERAL
+        try:
+            datos_info = empresa.info
+            if isinstance(datos_info, dict):
+                info.update(datos_info)
+        except Exception:
+            pass
+
+        # 2. FAST INFO
+        try:
+            fast = empresa.fast_info
+            if fast:
+                mapa_fast = {
+                    "currentPrice": "last_price",
+                    "marketCap": "market_cap",
+                    "sharesOutstanding": "shares"
+                }
+                for destino, origen in mapa_fast.items():
+                    if destino not in info or info.get(destino) is None:
+                        try:
+                            valor = getattr(fast, origen, None)
+                            if valor is not None:
+                                info[destino] = valor
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+        # 3. CUENTA DE RESULTADOS
+        try:
+            income = empresa.get_income_stmt(freq="yearly")
+            if income is not None and not income.empty:
+                ultima_columna = income.columns[0]
+
+                def fila_income(nombres):
+                    for nombre in nombres:
+                        if nombre in income.index:
+                            valor = income.loc[nombre, ultima_columna]
+                            valor = limpiar_numero(valor)
+                            if valor is not None:
+                                return valor
+                    return None
+
+                if info.get("totalRevenue") is None:
+                    valor = fila_income(["TotalRevenue", "OperatingRevenue"])
+                    if valor is not None: info["totalRevenue"] = valor
+
+                if info.get("netIncomeToCommon") is None:
+                    valor = fila_income(["NetIncomeCommonStockholders", "NetIncome", "NetIncomeIncludingNoncontrollingInterests"])
+                    if valor is not None: info["netIncomeToCommon"] = valor
+
+                if info.get("operatingIncome") is None:
+                    valor = fila_income(["OperatingIncome"])
+                    if valor is not None: info["operatingIncome"] = valor
+
+                if info.get("grossProfit") is None:
+                    valor = fila_income(["GrossProfit"])
+                    if valor is not None: info["grossProfit"] = valor
+        except Exception:
+            pass
+
+        # 4. BALANCE
+        try:
+            balance = empresa.get_balance_sheet(freq="yearly")
+            if balance is not None and not balance.empty:
+                ultima_columna = balance.columns[0]
+
+                def fila_balance(nombres):
+                    for nombre in nombres:
+                        if nombre in balance.index:
+                            valor = balance.loc[nombre, ultima_columna]
+                            valor = limpiar_numero(valor)
+                            if valor is not None:
+                                return valor
+                    return None
+
+                if info.get("totalDebt") is None:
+                    valor = fila_balance(["TotalDebt", "TotalLiabilitiesNetMinorityInterest"])
+                    if valor is not None: info["totalDebt"] = valor
+
+                if info.get("totalCash") is None:
+                    valor = fila_balance(["CashCashEquivalentsAndShortTermInvestments", "CashAndCashEquivalents"])
+                    if valor is not None: info["totalCash"] = valor
+
+                if info.get("stockholdersEquity") is None:
+                    valor = fila_balance(["StockholdersEquity", "CommonStockEquity"])
+                    if valor is not None: info["stockholdersEquity"] = valor
+        except Exception:
+            pass
+
+        # 5. CASH FLOW
+        try:
+            cashflow = empresa.get_cash_flow(freq="yearly")
+            if cashflow is not None and not cashflow.empty:
+                ultima_columna = cashflow.columns[0]
+
+                def fila_cashflow(nombres):
+                    for nombre in nombres:
+                        if nombre in cashflow.index:
+                            valor = cashflow.loc[nombre, ultima_columna]
+                            valor = limpiar_numero(valor)
+                            if valor is not None:
+                                return valor
+                    return None
+
+                if info.get("freeCashflow") is None:
+                    flujo_operativo = fila_cashflow(["OperatingCashFlow", "TotalCashFromOperatingActivities"])
+                    capex = fila_cashflow(["CapitalExpenditure", "CapitalExpenditures"])
+                    if flujo_operativo is not None:
+                        if capex is None: capex = 0
+                        info["freeCashflow"] = flujo_operativo + capex
+        except Exception:
+            pass
+
+        # 6. ACCIONES
+        if info.get("sharesOutstanding") is None:
+            try:
+                shares = empresa.get_shares_full(start="2024-01-01")
+                if shares is not None and not shares.empty:
+                    valor = limpiar_numero(shares.iloc[-1])
+                    if valor is not None:
+                        info["sharesOutstanding"] = valor
+            except Exception:
+                pass
+
+        # 7. CALCULOS SI FALTAN DATOS
+        precio = limpiar_numero(info.get("currentPrice"))
+        if precio is None:
+            precio = limpiar_numero(info.get("regularMarketPrice"))
+
+        eps = limpiar_numero(info.get("trailingEps"))
+        if eps is None and precio is not None and info.get("trailingPE") is not None:
+            pe = limpiar_numero(info.get("trailingPE"))
+            if pe is not None and pe != 0:
+                info["trailingEps"] = precio / pe
+
+        # 8. MARGENES Y RATIOS
+        if info.get("profitMargins") is None:
+            ingresos = limpiar_numero(info.get("totalRevenue"))
+            beneficio = limpiar_numero(info.get("netIncomeToCommon"))
+            if ingresos and beneficio is not None and ingresos != 0:
+                info["profitMargins"] = beneficio / ingresos
+
+        if info.get("operatingMargins") is None:
+            ingresos = limpiar_numero(info.get("totalRevenue"))
+            operating = limpiar_numero(info.get("operatingIncome"))
+            if ingresos and operating is not None and ingresos != 0:
+                info["operatingMargins"] = operating / ingresos
+
+        if info.get("returnOnEquity") is None:
+            beneficio = limpiar_numero(info.get("netIncomeToCommon"))
+            equity = limpiar_numero(info.get("stockholdersEquity"))
+            if beneficio is not None and equity is not None and equity != 0:
+                info["returnOnEquity"] = beneficio / equity
+
+        if info.get("debtToEquity") is None:
+            deuda = limpiar_numero(info.get("totalDebt"))
+            equity = limpiar_numero(info.get("stockholdersEquity"))
+            if deuda is not None and equity is not None and equity != 0:
+                info["debtToEquity"] = (deuda / equity) * 100
+
+        return info
+    except Exception:
+        return info
+
+# =========================================================
+# OBJETIVOS DE ANALISTAS — MULTIFUENTE
+# =========================================================
+
+@st.cache_data(ttl=3600)
+def obtener_objetivos_analistas(ticker):
+    resultado = {}
+    try:
+        empresa = yf.Ticker(ticker)
+
+        # MÉTODO 1
+        try:
+            datos = empresa.get_analyst_price_targets()
+            if datos is not None:
+                if hasattr(datos, "to_dict"): datos = datos.to_dict()
+                if isinstance(datos, dict): resultado.update(datos)
+        except Exception:
+            pass
+
+        # MÉTODO 2
+        try:
+            datos = empresa.analyst_price_targets
+            if datos is not None:
+                if hasattr(datos, "to_dict"): datos = datos.to_dict()
+                if isinstance(datos, dict):
+                    for clave, valor in datos.items():
+                        if clave not in resultado or resultado.get(clave) is None:
+                            resultado[clave] = valor
+        except Exception:
+            pass
+
+        # MÉTODO 3 — INFO
+        try:
+            info = obtener_info(ticker)
+            equivalencias = {
+                "low": "targetLowPrice",
+                "mean": "targetMeanPrice",
+                "median": "targetMedianPrice",
+                "high": "targetHighPrice"
+            }
+            for destino, origen in equivalencias.items():
+                if destino not in resultado or resultado.get(destino) is None:
+                    valor = limpiar_numero(info.get(origen))
+                    if valor is not None: resultado[destino] = valor
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    return resultado
 
 # =========================================================
 # HISTÓRICOS
@@ -970,44 +354,6 @@ def obtener_precios(ticker, periodo):
         return pd.DataFrame()
 
 # =========================================================
-# INFORMACIÓN GENERAL
-# =========================================================
-
-@st.cache_data(ttl=3600)
-def obtener_info(ticker):
-    try:
-        empresa = yf.Ticker(ticker)
-        return empresa.info or {}
-    except Exception:
-        return {}
-
-# =========================================================
-# OBJETIVOS DE ANALISTAS
-# =========================================================
-
-@st.cache_data(ttl=3600)
-def obtener_objetivos_analistas(ticker):
-    try:
-        empresa = yf.Ticker(ticker)
-        datos = empresa.analyst_price_targets
-        if datos is None:
-            return {}
-        if hasattr(datos, "to_dict"):
-            datos = datos.to_dict()
-        return datos
-    except Exception:
-        try:
-            empresa = yf.Ticker(ticker)
-            datos = empresa.get_analyst_price_targets()
-            if datos is None:
-                return {}
-            if hasattr(datos, "to_dict"):
-                datos = datos.to_dict()
-            return datos
-        except Exception:
-            return {}
-
-# =========================================================
 # RECOMENDACIONES
 # =========================================================
 
@@ -1016,9 +362,7 @@ def obtener_recomendaciones(ticker):
     try:
         empresa = yf.Ticker(ticker)
         datos = empresa.recommendations_summary
-        if datos is None:
-            datos = pd.DataFrame()
-        return datos
+        return datos if datos is not None else pd.DataFrame()
     except Exception:
         return pd.DataFrame()
 
@@ -1028,9 +372,7 @@ def obtener_historial_recomendaciones(ticker):
     try:
         empresa = yf.Ticker(ticker)
         datos = empresa.recommendations
-        if datos is None:
-            return pd.DataFrame()
-        return datos
+        return datos if datos is not None else pd.DataFrame()
     except Exception:
         return pd.DataFrame()
 
@@ -1040,322 +382,112 @@ def obtener_upgrades_downgrades(ticker):
     try:
         empresa = yf.Ticker(ticker)
         datos = empresa.upgrades_downgrades
-        if datos is None:
-            return pd.DataFrame()
-        return datos
+        return datos if datos is not None else pd.DataFrame()
     except Exception:
         return pd.DataFrame()
 
 # =========================================================
-# ESTIMACIONES EPS
-# =========================================================
-
-# =========================================================
-# ESTIMACIONES EPS — MULTIFUENTE
+# ESTIMACIONES — MULTIFUENTE
 # =========================================================
 
 @st.cache_data(ttl=3600)
 def obtener_estimaciones_eps(ticker):
-
-    try:
-
-        empresa = yf.Ticker(
-            ticker
-        )
-
-
-        # Primero usamos el método moderno
-        try:
-
-            datos = (
-                empresa.get_earnings_estimate()
-            )
-
-            if (
-                datos is not None
-                and not datos.empty
-            ):
-
-                return datos
-
-        except Exception:
-            pass
-
-
-        # Compatibilidad con versiones anteriores
-        try:
-
-            datos = (
-                empresa.earnings_estimate
-            )
-
-            if (
-                datos is not None
-                and not datos.empty
-            ):
-
-                return datos
-
-        except Exception:
-            pass
-
-
-    except Exception:
-        pass
-
-
-    return pd.DataFrame()
     try:
         empresa = yf.Ticker(ticker)
-        datos = empresa.earnings_estimate
-        if datos is None:
-            return pd.DataFrame()
-        return datos
+        try:
+            datos = empresa.get_earnings_estimate()
+            if datos is not None and not datos.empty: return datos
+        except Exception:
+            pass
+
+        try:
+            datos = empresa.earnings_estimate
+            if datos is not None and not datos.empty: return datos
+        except Exception:
+            pass
     except Exception:
-        return pd.DataFrame()
+        pass
+    return pd.DataFrame()
 
-
-# =========================================================
-# ESTIMACIONES DE INGRESOS
-# =========================================================
 
 @st.cache_data(ttl=3600)
 def obtener_estimaciones_ingresos(ticker):
-
-    try:
-
-        empresa = yf.Ticker(
-            ticker
-        )
-
-
-        try:
-
-            datos = (
-                empresa.get_revenue_estimate()
-            )
-
-            if (
-                datos is not None
-                and not datos.empty
-            ):
-
-                return datos
-
-        except Exception:
-            pass
-
-
-        try:
-
-            datos = (
-                empresa.revenue_estimate
-            )
-
-            if (
-                datos is not None
-                and not datos.empty
-            ):
-
-                return datos
-
-        except Exception:
-            pass
-
-
-    except Exception:
-        pass
-
-
-    return pd.DataFrame()
     try:
         empresa = yf.Ticker(ticker)
-        datos = empresa.revenue_estimate
-        if datos is None:
-            return pd.DataFrame()
-        return datos
+        try:
+            datos = empresa.get_revenue_estimate()
+            if datos is not None and not datos.empty: return datos
+        except Exception:
+            pass
+
+        try:
+            datos = empresa.revenue_estimate
+            if datos is not None and not datos.empty: return datos
+        except Exception:
+            pass
     except Exception:
-        return pd.DataFrame()
+        pass
+    return pd.DataFrame()
 
 
-@st.cache_data(ttl=3600)
 @st.cache_data(ttl=3600)
 def obtener_revisiones_eps(ticker):
-
-    try:
-
-        empresa = yf.Ticker(
-            ticker
-        )
-
-
-        try:
-
-            datos = (
-                empresa.get_eps_revisions()
-            )
-
-            if (
-                datos is not None
-                and not datos.empty
-            ):
-
-                return datos
-
-        except Exception:
-            pass
-
-
-        try:
-
-            datos = (
-                empresa.eps_revisions
-            )
-
-            if (
-                datos is not None
-                and not datos.empty
-            ):
-
-                return datos
-
-        except Exception:
-            pass
-
-
-    except Exception:
-        pass
-
-
-    return pd.DataFrame()
     try:
         empresa = yf.Ticker(ticker)
-        datos = empresa.eps_revisions
-        if datos is None:
-            return pd.DataFrame()
-        return datos
+        try:
+            datos = empresa.get_eps_revisions()
+            if datos is not None and not datos.empty: return datos
+        except Exception:
+            pass
+
+        try:
+            datos = empresa.eps_revisions
+            if datos is not None and not datos.empty: return datos
+        except Exception:
+            pass
     except Exception:
-        return pd.DataFrame()
+        pass
+    return pd.DataFrame()
 
 
-@st.cache_data(ttl=3600)
 @st.cache_data(ttl=3600)
 def obtener_tendencia_eps(ticker):
-
-    try:
-
-        empresa = yf.Ticker(
-            ticker
-        )
-
-
-        try:
-
-            datos = (
-                empresa.get_eps_trend()
-            )
-
-            if (
-                datos is not None
-                and not datos.empty
-            ):
-
-                return datos
-
-        except Exception:
-            pass
-
-
-        try:
-
-            datos = (
-                empresa.eps_trend
-            )
-
-            if (
-                datos is not None
-                and not datos.empty
-            ):
-
-                return datos
-
-        except Exception:
-            pass
-
-
-    except Exception:
-        pass
-
-
-    return pd.DataFrame()
     try:
         empresa = yf.Ticker(ticker)
-        datos = empresa.eps_trend
-        if datos is None:
-            return pd.DataFrame()
-        return datos
+        try:
+            datos = empresa.get_eps_trend()
+            if datos is not None and not datos.empty: return datos
+        except Exception:
+            pass
+
+        try:
+            datos = empresa.eps_trend
+            if datos is not None and not datos.empty: return datos
+        except Exception:
+            pass
     except Exception:
-        return pd.DataFrame()
+        pass
+    return pd.DataFrame()
 
 
-@st.cache_data(ttl=3600)
 @st.cache_data(ttl=3600)
 def obtener_crecimiento_estimado(ticker):
-
-    try:
-
-        empresa = yf.Ticker(
-            ticker
-        )
-
-
-        try:
-
-            datos = (
-                empresa.get_growth_estimates()
-            )
-
-            if (
-                datos is not None
-                and not datos.empty
-            ):
-
-                return datos
-
-        except Exception:
-            pass
-
-
-        try:
-
-            datos = (
-                empresa.growth_estimates
-            )
-
-            if (
-                datos is not None
-                and not datos.empty
-            ):
-
-                return datos
-
-        except Exception:
-            pass
-
-
-    except Exception:
-        pass
-
-
-    return pd.DataFrame()
     try:
         empresa = yf.Ticker(ticker)
-        datos = empresa.growth_estimates
-        if datos is None:
-            return pd.DataFrame()
-        return datos
+        try:
+            datos = empresa.get_growth_estimates()
+            if datos is not None and not datos.empty: return datos
+        except Exception:
+            pass
+
+        try:
+            datos = empresa.growth_estimates
+            if datos is not None and not datos.empty: return datos
+        except Exception:
+            pass
     except Exception:
-        return pd.DataFrame()
+        pass
+    return pd.DataFrame()
 
 # =========================================================
 # NOTICIAS
@@ -1366,14 +498,12 @@ def obtener_noticias(ticker):
     try:
         empresa = yf.Ticker(ticker)
         noticias = empresa.news
-        if noticias is None:
-            return []
-        return noticias
+        return noticias if noticias is not None else []
     except Exception:
         return []
 
 # =========================================================
-# RSI
+# RSI Y SCORES
 # =========================================================
 
 def calcular_rsi(precios, periodo=14):
@@ -1387,9 +517,6 @@ def calcular_rsi(precios, periodo=14):
     rs = media_ganancias / media_perdidas.replace(0, np.nan)
     return 100 - (100 / (1 + rs))
 
-# =========================================================
-# SCORES
-# =========================================================
 
 def calcular_score_tecnico(precio, ma20, ma50, ma200, rsi):
     score = 0
@@ -1452,28 +579,19 @@ def calcular_score_valoracion(pe, forward_pe, peg, price_to_book):
             razones.append("PER muy elevado.")
 
     if forward_pe is not None:
-        if forward_pe < 15:
-            score += 7
-        elif forward_pe < 25:
-            score += 5
-        elif forward_pe < 40:
-            score += 2
+        if forward_pe < 15: score += 7
+        elif forward_pe < 25: score += 5
+        elif forward_pe < 40: score += 2
 
     if peg is not None:
-        if peg < 1:
-            score += 6
-        elif peg < 2:
-            score += 4
-        else:
-            score += 1
+        if peg < 1: score += 6
+        elif peg < 2: score += 4
+        else: score += 1
 
     if price_to_book is not None:
-        if price_to_book < 2:
-            score += 4
-        elif price_to_book < 5:
-            score += 2
-        else:
-            score += 1
+        if price_to_book < 2: score += 4
+        elif price_to_book < 5: score += 2
+        else: score += 1
 
     return min(score, 25), razones
 
@@ -1530,24 +648,16 @@ def calcular_score_crecimiento(crecimiento_ingresos, crecimiento_beneficios):
     razones = []
 
     if crecimiento_ingresos is not None:
-        if crecimiento_ingresos > 0.15:
-            score += 7
-        elif crecimiento_ingresos > 0.05:
-            score += 5
-        elif crecimiento_ingresos > 0:
-            score += 2
-        else:
-            razones.append("Los ingresos están decreciendo.")
+        if crecimiento_ingresos > 0.15: score += 7
+        elif crecimiento_ingresos > 0.05: score += 5
+        elif crecimiento_ingresos > 0: score += 2
+        else: razones.append("Los ingresos están decreciendo.")
 
     if crecimiento_beneficios is not None:
-        if crecimiento_beneficios > 0.15:
-            score += 8
-        elif crecimiento_beneficios > 0.05:
-            score += 5
-        elif crecimiento_beneficios > 0:
-            score += 2
-        else:
-            razones.append("Los beneficios están decreciendo.")
+        if crecimiento_beneficios > 0.15: score += 8
+        elif crecimiento_beneficios > 0.05: score += 5
+        elif crecimiento_beneficios > 0: score += 2
+        else: razones.append("Los beneficios están decreciendo.")
 
     return min(score, 15), razones
 
@@ -1556,23 +666,17 @@ def calcular_score_riesgo(volatilidad, deuda):
     score = 0
     razones = []
 
-    if volatilidad < 20:
-        score += 6
-    elif volatilidad < 35:
-        score += 4
-    elif volatilidad < 50:
-        score += 2
+    if volatilidad < 20: score += 6
+    elif volatilidad < 35: score += 4
+    elif volatilidad < 50: score += 2
     else:
         score += 1
         razones.append("Volatilidad muy elevada.")
 
     if deuda is not None:
-        if deuda < 50:
-            score += 4
-        elif deuda < 100:
-            score += 2
-        else:
-            score += 1
+        if deuda < 50: score += 4
+        elif deuda < 100: score += 2
+        else: score += 1
     else:
         score += 2
 
@@ -1627,14 +731,10 @@ def diagnosticar_fair_value(precio_actual, fair_value):
 
     potencial = ((fair_value - precio_actual) / precio_actual) * 100
 
-    if potencial >= 30:
-        return "🟢 MUY INFRAVALORADA", potencial
-    if potencial >= 15:
-        return "🟢 INFRAVALORADA", potencial
-    if potencial >= -10:
-        return "🟡 VALORACIÓN RAZONABLE", potencial
-    if potencial >= -25:
-        return "🟠 SOBREVALORADA", potencial
+    if potencial >= 30: return "🟢 MUY INFRAVALORADA", potencial
+    if potencial >= 15: return "🟢 INFRAVALORADA", potencial
+    if potencial >= -10: return "🟡 VALORACIÓN RAZONABLE", potencial
+    if potencial >= -25: return "🟠 SOBREVALORADA", potencial
 
     return "🔴 MUY SOBREVALORADA", potencial
 
@@ -1798,271 +898,116 @@ def calcular_diagnostico_predictivo(
     ma200,
     objetivo_analistas=None
 ):
-
     señales = []
     riesgos = []
 
-    # =====================================================
-    # VALORACIÓN
-    # =====================================================
-
     potencial_fair = None
-
-    if (
-        precio is not None
-        and fair_value is not None
-        and precio > 0
-    ):
-
-        potencial_fair = (
-            (fair_value - precio)
-            / precio
-        ) * 100
-
+    if precio is not None and fair_value is not None and precio > 0:
+        potencial_fair = ((fair_value - precio) / precio) * 100
         if potencial_fair >= 20:
-            señales.append(
-                "La acción presenta un descuento importante "
-                "respecto al Fair Value."
-            )
+            señales.append("La acción presenta un descuento importante respecto al Fair Value.")
         elif potencial_fair >= 10:
-            señales.append(
-                "La acción presenta un descuento moderado "
-                "respecto al Fair Value."
-            )
+            señales.append("La acción presenta un descuento moderado respecto al Fair Value.")
         elif potencial_fair <= -20:
-            riesgos.append(
-                "El precio está muy por encima "
-                "del Fair Value estimado."
-            )
+            riesgos.append("El precio está muy por encima del Fair Value estimado.")
         elif potencial_fair <= -10:
-            riesgos.append(
-                "El precio está por encima "
-                "del Fair Value estimado."
-            )
-
-    # =====================================================
-    # TENDENCIA
-    # =====================================================
+            riesgos.append("El precio está por encima del Fair Value estimado.")
 
     tendencia = "LATERAL"
-
-    if (
-        ma20 is not None
-        and ma50 is not None
-        and ma200 is not None
-    ):
-        if (
-            precio > ma20
-            and ma20 > ma50
-            and ma50 > ma200
-        ):
+    if ma20 is not None and ma50 is not None and ma200 is not None:
+        if precio > ma20 and ma20 > ma50 and ma50 > ma200:
             tendencia = "ALCISTA"
-            señales.append(
-                "La estructura de medias móviles "
-                "confirma una tendencia alcista."
-            )
-        elif (
-            precio < ma20
-            and ma20 < ma50
-            and ma50 < ma200
-        ):
+            señales.append("La estructura de medias móviles confirma una tendencia alcista.")
+        elif precio < ma20 and ma20 < ma50 and ma50 < ma200:
             tendencia = "BAJISTA"
-            riesgos.append(
-                "Las medias móviles muestran "
-                "una estructura bajista."
-            )
+            riesgos.append("Las medias móviles muestran una estructura bajista.")
         else:
             tendencia = "LATERAL"
-            señales.append(
-                "Las medias móviles no muestran "
-                "una tendencia claramente definida."
-            )
-
-    # =====================================================
-    # RSI
-    # =====================================================
+            señales.append("Las medias móviles no muestran una tendencia claramente definida.")
 
     situacion_rsi = "NEUTRAL"
-
     if rsi is not None:
         if rsi >= 75:
             situacion_rsi = "SOBRECOMPRA"
-            riesgos.append(
-                "El RSI indica una situación "
-                "de sobrecompra."
-            )
+            riesgos.append("El RSI indica una situación de sobrecompra.")
         elif rsi <= 30:
             situacion_rsi = "SOBREVENTA"
-            señales.append(
-                "El RSI indica una situación "
-                "de sobreventa."
-            )
+            señales.append("El RSI indica una situación de sobreventa.")
         elif 45 <= rsi <= 70:
             situacion_rsi = "SALUDABLE"
-            señales.append(
-                "El RSI se encuentra en una zona "
-                "relativamente saludable."
-            )
-
-    # =====================================================
-    # FUNDAMENTALES
-    # =====================================================
+            señales.append("El RSI se encuentra en una zona relativamente saludable.")
 
     if score_fundamentales >= 20:
         señales.append("Los fundamentales son sólidos.")
     elif score_fundamentales < 12:
         riesgos.append("Los fundamentales presentan varias señales débiles.")
 
-    # =====================================================
-    # CRECIMIENTO
-    # =====================================================
-
     if score_crecimiento >= 12:
-        señales.append(
-            "El crecimiento de ingresos y beneficios "
-            "es favorable."
-        )
+        señales.append("El crecimiento de ingresos y beneficios es favorable.")
     elif score_crecimiento < 7:
-        riesgos.append(
-            "El crecimiento de la empresa "
-            "es limitado o débil."
-        )
-
-    # =====================================================
-    # RIESGO
-    # =====================================================
+        riesgos.append("El crecimiento de la empresa es limitado o débil.")
 
     if score_riesgo <= 4:
-        riesgos.append(
-            "El nivel de riesgo estimado "
-            "es relativamente elevado."
-        )
+        riesgos.append("El nivel de riesgo estimado es relativamente elevado.")
     elif score_riesgo >= 8:
         señales.append("El perfil de riesgo es relativamente favorable.")
 
-    # =====================================================
-    # OBJETIVO DE ANALISTAS
-    # =====================================================
-
     potencial_analistas = None
-
-    if (
-        objetivo_analistas is not None
-        and precio is not None
-        and precio > 0
-    ):
-        potencial_analistas = (
-            (objetivo_analistas - precio) / precio
-        ) * 100
-
+    if objetivo_analistas is not None and precio is not None and precio > 0:
+        potencial_analistas = ((objetivo_analistas - precio) / precio) * 100
         if potencial_analistas >= 15:
-            señales.append(
-                "El objetivo medio de los analistas "
-                "implica un potencial relevante."
-            )
+            señales.append("El objetivo medio de los analistas implica un potencial relevante.")
         elif potencial_analistas <= -10:
-            riesgos.append(
-                "El objetivo medio de los analistas "
-                "está por debajo del precio actual."
-            )
-
-    # =====================================================
-    # DIRECCIÓN PROBABLE
-    # =====================================================
+            riesgos.append("El objetivo medio de los analistas está por debajo del precio actual.")
 
     puntos_alcistas = 0
     puntos_bajistas = 0
 
-    if tendencia == "ALCISTA":
-        puntos_alcistas += 3
-    elif tendencia == "BAJISTA":
-        puntos_bajistas += 3
+    if tendencia == "ALCISTA": puntos_alcistas += 3
+    elif tendencia == "BAJISTA": puntos_bajistas += 3
 
     if potencial_fair is not None:
-        if potencial_fair >= 15:
-            puntos_alcistas += 3
-        elif potencial_fair >= 5:
-            puntos_alcistas += 1
-        elif potencial_fair <= -15:
-            puntos_bajistas += 3
-        elif potencial_fair <= -5:
-            puntos_bajistas += 1
+        if potencial_fair >= 15: puntos_alcistas += 3
+        elif potencial_fair >= 5: puntos_alcistas += 1
+        elif potencial_fair <= -15: puntos_bajistas += 3
+        elif potencial_fair <= -5: puntos_bajistas += 1
 
-    if score_fundamentales >= 20:
-        puntos_alcistas += 2
-    elif score_fundamentales < 12:
-        puntos_bajistas += 2
+    if score_fundamentales >= 20: puntos_alcistas += 2
+    elif score_fundamentales < 12: puntos_bajistas += 2
 
-    if score_crecimiento >= 12:
-        puntos_alcistas += 2
-    elif score_crecimiento < 7:
-        puntos_bajistas += 1
+    if score_crecimiento >= 12: puntos_alcistas += 2
+    elif score_crecimiento < 7: puntos_bajistas += 1
 
     if rsi is not None:
-        if rsi <= 30:
-            puntos_alcistas += 1
-        elif rsi >= 75:
-            puntos_bajistas += 1
+        if rsi <= 30: puntos_alcistas += 1
+        elif rsi >= 75: puntos_bajistas += 1
 
     if potencial_analistas is not None:
-        if potencial_analistas >= 15:
-            puntos_alcistas += 2
-        elif potencial_analistas <= -10:
-            puntos_bajistas += 2
+        if potencial_analistas >= 15: puntos_alcistas += 2
+        elif potencial_analistas <= -10: puntos_bajistas += 2
 
-    if puntos_alcistas >= puntos_bajistas + 3:
-        direccion = "🟢 ALCISTA"
-    elif puntos_bajistas >= puntos_alcistas + 3:
-        direccion = "🔴 BAJISTA"
-    else:
-        direccion = "🟡 LATERAL / INCIERTA"
+    if puntos_alcistas >= puntos_bajistas + 3: direccion = "🟢 ALCISTA"
+    elif puntos_bajistas >= puntos_alcistas + 3: direccion = "🔴 BAJISTA"
+    else: direccion = "🟡 LATERAL / INCIERTA"
 
-    # =====================================================
-    # HORIZONTE
-    # =====================================================
-
-    if (
-        potencial_fair is not None
-        and potencial_fair >= 20
-        and tendencia == "ALCISTA"
-    ):
+    if potencial_fair is not None and potencial_fair >= 20 and tendencia == "ALCISTA":
         horizonte = "3–9 meses"
-    elif (
-        potencial_fair is not None
-        and potencial_fair >= 10
-    ):
+    elif potencial_fair is not None and potencial_fair >= 10:
         horizonte = "3–12 meses"
-    elif (
-        tendencia == "ALCISTA"
-        and score_total >= 70
-    ):
+    elif tendencia == "ALCISTA" and score_total >= 70:
         horizonte = "1–6 meses"
     elif tendencia == "BAJISTA":
         horizonte = "1–6 meses"
     else:
         horizonte = "1–12 meses"
 
-    # =====================================================
-    # SEÑAL FINAL
-    # =====================================================
+    if score_total >= 85: señal = "🟢 COMPRA"
+    elif score_total >= 70: señal = "🟢 COMPRA MODERADA"
+    elif score_total >= 55: señal = "🟡 MANTENER"
+    elif score_total >= 40: señal = "🟠 ESPERAR"
+    else: señal = "🔴 EVITAR"
 
-    if score_total >= 85:
-        señal = "🟢 COMPRA"
-    elif score_total >= 70:
-        señal = "🟢 COMPRA MODERADA"
-    elif score_total >= 55:
-        señal = "🟡 MANTENER"
-    elif score_total >= 40:
-        señal = "🟠 ESPERAR"
-    else:
-        señal = "🔴 EVITAR"
-
-    # Ajuste por valoración extrema
-    if (
-        potencial_fair is not None
-        and potencial_fair <= -25
-        and señal in ["🟢 COMPRA", "🟢 COMPRA MODERADA"]
-    ):
+    if potencial_fair is not None and potencial_fair <= -25 and señal in ["🟢 COMPRA", "🟢 COMPRA MODERADA"]:
         señal = "🟡 MANTENER"
 
     return {
@@ -2164,31 +1109,19 @@ if analizar:
         st.error("Debes introducir un ticker.")
         st.stop()
 
-    # Precios
     with st.spinner("Obteniendo precio..."):
         precio_alpha, error_alpha = obtener_precio_alpha_vantage(ticker)
 
+    precio_mercado = None
     if precio_alpha:
         precio_mercado = precio_alpha["precio"]
         fecha_precio = precio_alpha["fecha"]
         st.info(f"💵 Precio: **${precio_mercado:,.2f}** | Alpha Vantage | {fecha_precio}")
-else:
+    else:
+        st.warning("⚠️ Alpha Vantage no ha proporcionado el precio en este momento.")
+        st.caption(f"Motivo: {error_alpha}")
+        st.info("MARKET AI utilizará automáticamente el último precio disponible de Yahoo Finance.")
 
-    precio_mercado = None
-
-    st.warning(
-        "⚠️ Alpha Vantage no ha proporcionado "
-        "el precio en este momento."
-    )
-
-    st.caption(
-        f"Motivo: {error_alpha}"
-    )
-
-    st.info(
-        "MARKET AI utilizará automáticamente "
-        "el último precio disponible de Yahoo Finance."
-    )
     if tipo_precio == "Precio personalizado" and precio_personalizado is not None:
         precio_analisis = float(precio_personalizado)
     elif precio_mercado is not None:
@@ -2221,7 +1154,7 @@ else:
     if precio_analisis is None:
         precio_analisis = precio_historico
         st.info(f"💵 Precio de respaldo: **${precio_analisis:,.2f}** | Yahoo Finance | último cierre disponible.")
-    precio_anterior = float(datos["Close"].iloc[-2])
+    precio_anterior = float(datos["Close"].iloc[-2]) if len(datos) > 1 else precio_historico
     variacion = ((precio_historico - precio_anterior) / precio_anterior) * 100
     maximo = float(datos["High"].max())
     minimo = float(datos["Low"].min())
@@ -2281,14 +1214,10 @@ else:
     st.header("💵 Situación de mercado")
 
     c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.metric("Precio", f"${precio_historico:,.2f}", f"{variacion:+.2f}%")
-    with c2:
-        st.metric("Máximo periodo", f"${maximo:,.2f}")
-    with c3:
-        st.metric("Mínimo periodo", f"${minimo:,.2f}")
-    with c4:
-        st.metric("RSI", f"{rsi:.1f}")
+    with c1: st.metric("Precio", f"${precio_historico:,.2f}", f"{variacion:+.2f}%")
+    with c2: st.metric("Máximo periodo", f"${maximo:,.2f}")
+    with c3: st.metric("Mínimo periodo", f"${minimo:,.2f}")
+    with c4: st.metric("RSI", f"{rsi:.1f}")
 
     # Renderizado: MARKET AI Score
     st.divider()
@@ -2354,14 +1283,10 @@ else:
     objetivo_mediano = limpiar_numero(obtener_valor(objetivos, ["median", "targetMedianPrice"]))
     objetivo_alto = limpiar_numero(obtener_valor(objetivos, ["high"]))
 
-    if objetivo_medio is None:
-        objetivo_medio = limpiar_numero(info.get("targetMeanPrice"))
-    if objetivo_bajo is None:
-        objetivo_bajo = limpiar_numero(info.get("targetLowPrice"))
-    if objetivo_mediano is None:
-        objetivo_mediano = limpiar_numero(info.get("targetMedianPrice"))
-    if objetivo_alto is None:
-        objetivo_alto = limpiar_numero(info.get("targetHighPrice"))
+    if objetivo_medio is None: objetivo_medio = limpiar_numero(info.get("targetMeanPrice"))
+    if objetivo_bajo is None: objetivo_bajo = limpiar_numero(info.get("targetLowPrice"))
+    if objetivo_mediano is None: objetivo_mediano = limpiar_numero(info.get("targetMedianPrice"))
+    if objetivo_alto is None: objetivo_alto = limpiar_numero(info.get("targetHighPrice"))
 
     if objetivo_medio is not None:
         precio_referencia = precio_analisis if precio_analisis is not None else precio_historico
@@ -2459,12 +1384,12 @@ else:
     st.caption("Estimación experimental del valor razonable mediante un modelo de Discounted Cash Flow (DCF).")
 
     valor_base = None
-     if (
-    flujo_caja is not None
-    and flujo_caja > 0
-    and acciones_en_circulacion is not None
-    and acciones_en_circulacion > 0
-):
+    if (
+        flujo_caja is not None
+        and flujo_caja > 0
+        and acciones_en_circulacion is not None
+        and acciones_en_circulacion > 0
+    ):
         escenarios_dcf = calcular_escenarios_dcf(
             free_cash_flow=flujo_caja,
             deuda=deuda_total if deuda_total is not None else 0,
@@ -2530,10 +1455,7 @@ else:
     st.write(f"### {estado_fair}")
     st.info("El Fair Value es una estimación experimental y no constituye asesoramiento financiero.")
 
-    # =====================================================
-    # DIAGNÓSTICO PREDICTIVO (BLOQUE 2 INTEGRADO)
-    # =====================================================
-
+    # Diagnóstico Predictivo
     st.divider()
     st.header("🔮 Diagnóstico predictivo MARKET AI")
 
@@ -2553,33 +1475,21 @@ else:
         objetivo_medio
     )
 
-    # RESUMEN PRINCIPAL
     col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Dirección probable", diagnostico["direccion"])
-    with col2:
-        st.metric("Señal", diagnostico["señal"])
-    with col3:
-        st.metric("Horizonte", diagnostico["horizonte"])
+    with col1: st.metric("Dirección probable", diagnostico["direccion"])
+    with col2: st.metric("Señal", diagnostico["señal"])
+    with col3: st.metric("Horizonte", diagnostico["horizonte"])
     with col4:
         potencial = diagnostico["potencial_fair"]
-        st.metric(
-            "Potencial Fair Value",
-            f"{potencial:+.2f}%" if potencial is not None else "N/D"
-        )
+        st.metric("Potencial Fair Value", f"{potencial:+.2f}%" if potencial is not None else "N/D")
 
-    # DIAGNÓSTICO EN LENGUAJE NATURAL
     st.subheader("🧠 ¿Qué está viendo MARKET AI?")
     direccion_texto = diagnostico["direccion"]
     tendencia_texto = diagnostico["tendencia"]
     rsi_texto = diagnostico["rsi"]
     señal_texto = diagnostico["señal"]
     horizonte_texto = diagnostico["horizonte"]
-
-    if potencial is not None:
-        potencial_texto = f"{potencial:+.1f}%"
-    else:
-        potencial_texto = "no disponible"
+    potencial_texto = f"{potencial:+.1f}%" if potencial is not None else "no disponible"
 
     st.write(f"""
 **{ticker}** presenta actualmente una dirección probable **{direccion_texto}**.
@@ -2593,25 +1503,18 @@ Teniendo en cuenta el conjunto de factores, MARKET AI establece actualmente una 
 El horizonte orientativo del modelo es de **{horizonte_texto}**.
 """)
 
-    # SEÑALES POSITIVAS
     if diagnostico["señales"]:
         st.subheader("🟢 Factores favorables")
-        for razon in diagnostico["señales"]:
-            st.write(f"✓ {razon}")
+        for razon in diagnostico["señales"]: st.write(f"✓ {razon}")
 
-    # RIESGOS
     if diagnostico["riesgos"]:
         st.subheader("⚠️ Riesgos detectados")
-        for riesgo in diagnostico["riesgos"]:
-            st.write(f"• {riesgo}")
+        for riesgo in diagnostico["riesgos"]: st.write(f"• {riesgo}")
 
-    # FUERZA DE LA SEÑAL
     st.subheader("⚖️ Balance de señales")
     c1, c2 = st.columns(2)
-    with c1:
-        st.metric("Presión alcista", diagnostico["puntos_alcistas"])
-    with c2:
-        st.metric("Presión bajista", diagnostico["puntos_bajistas"])
+    with c1: st.metric("Presión alcista", diagnostico["puntos_alcistas"])
+    with c2: st.metric("Presión bajista", diagnostico["puntos_bajistas"])
 
     # Diagnóstico General Estático
     st.divider()
@@ -2625,8 +1528,7 @@ El horizonte orientativo del modelo es de **{horizonte_texto}**.
         st.write(f"**{ticker} presenta actualmente varias señales desfavorables**, con una puntuación de **{score_total}/100**.")
 
     razones = razones_tecnico + razones_valoracion + razones_fundamentales + razones_crecimiento + razones_riesgo
-    for razon in razones:
-        st.write(f"• {razon}")
+    for razon in razones: st.write(f"• {razon}")
 
     # Gráficos
     st.divider()
