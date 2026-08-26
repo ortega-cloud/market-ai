@@ -59,16 +59,686 @@ def obtener_valor(diccionario, claves):
 # ALPHA VANTAGE
 # =========================================================
 
-@st.cache_data(ttl=900)
-def obtener_precio_alpha_vantage(ticker):
+# =========================================================
+# INFORMACIÓN FINANCIERA ROBUSTA
+# =========================================================
+
+@st.cache_data(ttl=3600)
+def obtener_info(ticker):
+
+    info = {}
+
     try:
-        api_key = st.secrets["ALPHA_VANTAGE_API_KEY"]
-    except Exception:
-        return None, (
-            "No se ha encontrado "
-            "ALPHA_VANTAGE_API_KEY "
-            "en los Secrets de Streamlit."
+
+        empresa = yf.Ticker(ticker)
+
+        # -------------------------------------------------
+        # 1. INFO GENERAL
+        # -------------------------------------------------
+
+        try:
+
+            datos_info = empresa.info
+
+            if isinstance(
+                datos_info,
+                dict
+            ):
+
+                info.update(
+                    datos_info
+                )
+
+        except Exception:
+            pass
+
+
+        # -------------------------------------------------
+        # 2. FAST INFO
+        # -------------------------------------------------
+
+        try:
+
+            fast = empresa.fast_info
+
+            if fast:
+
+                mapa_fast = {
+
+                    "currentPrice":
+                        "last_price",
+
+                    "marketCap":
+                        "market_cap",
+
+                    "sharesOutstanding":
+                        "shares"
+
+                }
+
+
+                for destino, origen in mapa_fast.items():
+
+                    if (
+                        destino
+                        not in info
+                        or info.get(destino) is None
+                    ):
+
+                        try:
+
+                            valor = getattr(
+                                fast,
+                                origen,
+                                None
+                            )
+
+                            if valor is not None:
+
+                                info[destino] = valor
+
+                        except Exception:
+                            pass
+
+        except Exception:
+            pass
+
+
+        # -------------------------------------------------
+        # 3. CUENTA DE RESULTADOS
+        # -------------------------------------------------
+
+        try:
+
+            income = (
+                empresa.get_income_stmt(
+                    freq="yearly"
+                )
+            )
+
+
+            if (
+                income is not None
+                and not income.empty
+            ):
+
+                ultima_columna = (
+                    income.columns[0]
+                )
+
+
+                def fila_income(
+                    nombres
+                ):
+
+                    for nombre in nombres:
+
+                        if nombre in income.index:
+
+                            valor = (
+                                income
+                                .loc[
+                                    nombre,
+                                    ultima_columna
+                                ]
+                            )
+
+                            valor = (
+                                limpiar_numero(
+                                    valor
+                                )
+                            )
+
+                            if valor is not None:
+
+                                return valor
+
+                    return None
+
+
+                if info.get(
+                    "totalRevenue"
+                ) is None:
+
+                    valor = fila_income(
+                        [
+                            "TotalRevenue",
+                            "OperatingRevenue"
+                        ]
+                    )
+
+                    if valor is not None:
+
+                        info[
+                            "totalRevenue"
+                        ] = valor
+
+
+                if info.get(
+                    "netIncomeToCommon"
+                ) is None:
+
+                    valor = fila_income(
+                        [
+                            "NetIncomeCommonStockholders",
+                            "NetIncome",
+                            "NetIncomeIncludingNoncontrollingInterests"
+                        ]
+                    )
+
+                    if valor is not None:
+
+                        info[
+                            "netIncomeToCommon"
+                        ] = valor
+
+
+                if info.get(
+                    "operatingIncome"
+                ) is None:
+
+                    valor = fila_income(
+                        [
+                            "OperatingIncome"
+                        ]
+                    )
+
+                    if valor is not None:
+
+                        info[
+                            "operatingIncome"
+                        ] = valor
+
+
+                if info.get(
+                    "grossProfit"
+                ) is None:
+
+                    valor = fila_income(
+                        [
+                            "GrossProfit"
+                        ]
+                    )
+
+                    if valor is not None:
+
+                        info[
+                            "grossProfit"
+                        ] = valor
+
+
+        except Exception:
+            pass
+
+
+        # -------------------------------------------------
+        # 4. BALANCE
+        # -------------------------------------------------
+
+        try:
+
+            balance = (
+                empresa.get_balance_sheet(
+                    freq="yearly"
+                )
+            )
+
+
+            if (
+                balance is not None
+                and not balance.empty
+            ):
+
+                ultima_columna = (
+                    balance.columns[0]
+                )
+
+
+                def fila_balance(
+                    nombres
+                ):
+
+                    for nombre in nombres:
+
+                        if nombre in balance.index:
+
+                            valor = (
+                                balance
+                                .loc[
+                                    nombre,
+                                    ultima_columna
+                                ]
+                            )
+
+                            valor = (
+                                limpiar_numero(
+                                    valor
+                                )
+                            )
+
+                            if valor is not None:
+
+                                return valor
+
+                    return None
+
+
+                if info.get(
+                    "totalDebt"
+                ) is None:
+
+                    valor = fila_balance(
+                        [
+                            "TotalDebt",
+                            "TotalLiabilitiesNetMinorityInterest"
+                        ]
+                    )
+
+                    if valor is not None:
+
+                        info[
+                            "totalDebt"
+                        ] = valor
+
+
+                if info.get(
+                    "totalCash"
+                ) is None:
+
+                    valor = fila_balance(
+                        [
+                            "CashCashEquivalentsAndShortTermInvestments",
+                            "CashAndCashEquivalents"
+                        ]
+                    )
+
+                    if valor is not None:
+
+                        info[
+                            "totalCash"
+                        ] = valor
+
+
+                if info.get(
+                    "stockholdersEquity"
+                ) is None:
+
+                    valor = fila_balance(
+                        [
+                            "StockholdersEquity",
+                            "CommonStockEquity"
+                        ]
+                    )
+
+                    if valor is not None:
+
+                        info[
+                            "stockholdersEquity"
+                        ] = valor
+
+
+        except Exception:
+            pass
+
+
+        # -------------------------------------------------
+        # 5. CASH FLOW
+        # -------------------------------------------------
+
+        try:
+
+            cashflow = (
+                empresa.get_cash_flow(
+                    freq="yearly"
+                )
+            )
+
+
+            if (
+                cashflow is not None
+                and not cashflow.empty
+            ):
+
+                ultima_columna = (
+                    cashflow.columns[0]
+                )
+
+
+                def fila_cashflow(
+                    nombres
+                ):
+
+                    for nombre in nombres:
+
+                        if nombre in cashflow.index:
+
+                            valor = (
+                                cashflow
+                                .loc[
+                                    nombre,
+                                    ultima_columna
+                                ]
+                            )
+
+                            valor = (
+                                limpiar_numero(
+                                    valor
+                                )
+                            )
+
+                            if valor is not None:
+
+                                return valor
+
+                    return None
+
+
+                if info.get(
+                    "freeCashflow"
+                ) is None:
+
+                    flujo_operativo = (
+                        fila_cashflow(
+                            [
+                                "OperatingCashFlow",
+                                "TotalCashFromOperatingActivities"
+                            ]
+                        )
+                    )
+
+
+                    capex = (
+                        fila_cashflow(
+                            [
+                                "CapitalExpenditure",
+                                "CapitalExpenditures"
+                            ]
+                        )
+                    )
+
+
+                    if (
+                        flujo_operativo
+                        is not None
+                    ):
+
+                        if capex is None:
+
+                            capex = 0
+
+
+                        info[
+                            "freeCashflow"
+                        ] = (
+                            flujo_operativo
+                            + capex
+                        )
+
+
+        except Exception:
+            pass
+
+
+        # -------------------------------------------------
+        # 6. ACCIONES
+        # -------------------------------------------------
+
+        if info.get(
+            "sharesOutstanding"
+        ) is None:
+
+            try:
+
+                shares = (
+                    empresa.get_shares_full(
+                        start="2024-01-01"
+                    )
+                )
+
+
+                if (
+                    shares is not None
+                    and not shares.empty
+                ):
+
+                    valor = (
+                        limpiar_numero(
+                            shares.iloc[-1]
+                        )
+                    )
+
+
+                    if valor is not None:
+
+                        info[
+                            "sharesOutstanding"
+                        ] = valor
+
+            except Exception:
+                pass
+
+
+        # -------------------------------------------------
+        # 7. CALCULOS SI FALTAN DATOS
+        # -------------------------------------------------
+
+        precio = (
+            limpiar_numero(
+                info.get(
+                    "currentPrice"
+                )
+            )
         )
+
+
+        if precio is None:
+
+            precio = (
+                limpiar_numero(
+                    info.get(
+                        "regularMarketPrice"
+                    )
+                )
+            )
+
+
+        # EPS
+        eps = (
+            limpiar_numero(
+                info.get(
+                    "trailingEps"
+                )
+            )
+        )
+
+
+        if (
+            eps is None
+            and precio is not None
+            and info.get(
+                "trailingPE"
+            ) is not None
+        ):
+
+            pe = limpiar_numero(
+                info.get(
+                    "trailingPE"
+                )
+            )
+
+            if (
+                pe is not None
+                and pe != 0
+            ):
+
+                info[
+                    "trailingEps"
+                ] = precio / pe
+
+
+        # -------------------------------------------------
+        # 8. MARGEN DE BENEFICIO
+        # -------------------------------------------------
+
+        if info.get(
+            "profitMargins"
+        ) is None:
+
+            ingresos = (
+                limpiar_numero(
+                    info.get(
+                        "totalRevenue"
+                    )
+                )
+            )
+
+            beneficio = (
+                limpiar_numero(
+                    info.get(
+                        "netIncomeToCommon"
+                    )
+                )
+            )
+
+
+            if (
+                ingresos
+                and beneficio is not None
+                and ingresos != 0
+            ):
+
+                info[
+                    "profitMargins"
+                ] = (
+                    beneficio
+                    / ingresos
+                )
+
+
+        # -------------------------------------------------
+        # 9. MARGEN OPERATIVO
+        # -------------------------------------------------
+
+        if info.get(
+            "operatingMargins"
+        ) is None:
+
+            ingresos = (
+                limpiar_numero(
+                    info.get(
+                        "totalRevenue"
+                    )
+                )
+            )
+
+            operating = (
+                limpiar_numero(
+                    info.get(
+                        "operatingIncome"
+                    )
+                )
+            )
+
+
+            if (
+                ingresos
+                and operating is not None
+                and ingresos != 0
+            ):
+
+                info[
+                    "operatingMargins"
+                ] = (
+                    operating
+                    / ingresos
+                )
+
+
+        # -------------------------------------------------
+        # 10. ROE
+        # -------------------------------------------------
+
+        if info.get(
+            "returnOnEquity"
+        ) is None:
+
+            beneficio = (
+                limpiar_numero(
+                    info.get(
+                        "netIncomeToCommon"
+                    )
+                )
+            )
+
+            equity = (
+                limpiar_numero(
+                    info.get(
+                        "stockholdersEquity"
+                    )
+                )
+            )
+
+
+            if (
+                beneficio is not None
+                and equity is not None
+                and equity != 0
+            ):
+
+                info[
+                    "returnOnEquity"
+                ] = (
+                    beneficio
+                    / equity
+                )
+
+
+        # -------------------------------------------------
+        # 11. DEUDA/PATRIMONIO
+        # -------------------------------------------------
+
+        if info.get(
+            "debtToEquity"
+        ) is None:
+
+            deuda = (
+                limpiar_numero(
+                    info.get(
+                        "totalDebt"
+                    )
+                )
+            )
+
+            equity = (
+                limpiar_numero(
+                    info.get(
+                        "stockholdersEquity"
+                    )
+                )
+            )
+
+
+            if (
+                deuda is not None
+                and equity is not None
+                and equity != 0
+            ):
+
+                info[
+                    "debtToEquity"
+                ] = (
+                    deuda
+                    / equity
+                    * 100
+                )
+
+
+        return info
+
+
+    except Exception:
+
+        return info
 
     try:
         url = "https://www.alphavantage.co/query"
