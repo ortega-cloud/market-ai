@@ -3374,7 +3374,7 @@ fair_value = (
         if "valor_base" in locals()
         else None,
 
-        objetivo_medio,
+        objetivo_medio if "objetivo_medio" in locals() else None,
 
         eps,
 
