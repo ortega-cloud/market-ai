@@ -3433,16 +3433,16 @@ with c3:
     )
 
 
-st.write(
-    f"### {estado_fair}"
-)
+    st.write(
+        f"### {estado_fair}"
+    )
 
 
-st.info(
-    "El Fair Value es una estimación "
-    "experimental y no constituye "
-    "asesoramiento financiero."
-)
+    st.info(
+        "El Fair Value es una estimación "
+        "experimental y no constituye "
+        "asesoramiento financiero."
+    )
    
 
     # =====================================================
