@@ -1127,11 +1127,15 @@ if analizar:
         noticias = obtener_noticias(ticker)
 
     if datos.empty:
-        st.error(f"No se han encontrado datos para {ticker}.")
+        st.error(f"No se han encontrado datos para {ticker}. Comprueba el símbolo o inténtalo de nuevo más tarde.")
         st.stop()
 
     # Cálculo técnico
     precio_historico = float(datos["Close"].iloc[-1])
+
+    if precio_analisis is None:
+        precio_analisis = precio_historico
+        st.info(f"💵 Precio de respaldo: **${precio_analisis:,.2f}** | Yahoo Finance | último cierre disponible.")
     precio_anterior = float(datos["Close"].iloc[-2])
     variacion = ((precio_historico - precio_anterior) / precio_anterior) * 100
     maximo = float(datos["High"].max())
@@ -1261,9 +1265,18 @@ if analizar:
     st.header("🎯 Analistas")
 
     objetivo_bajo = limpiar_numero(obtener_valor(objetivos, ["low"]))
-    objetivo_medio = limpiar_numero(obtener_valor(objetivos, ["mean"]))
-    objetivo_mediano = limpiar_numero(obtener_valor(objetivos, ["median"]))
+    objetivo_medio = limpiar_numero(obtener_valor(objetivos, ["mean", "targetMeanPrice"]))
+    objetivo_mediano = limpiar_numero(obtener_valor(objetivos, ["median", "targetMedianPrice"]))
     objetivo_alto = limpiar_numero(obtener_valor(objetivos, ["high"]))
+
+    if objetivo_medio is None:
+        objetivo_medio = limpiar_numero(info.get("targetMeanPrice"))
+    if objetivo_bajo is None:
+        objetivo_bajo = limpiar_numero(info.get("targetLowPrice"))
+    if objetivo_mediano is None:
+        objetivo_mediano = limpiar_numero(info.get("targetMedianPrice"))
+    if objetivo_alto is None:
+        objetivo_alto = limpiar_numero(info.get("targetHighPrice"))
 
     if objetivo_medio is not None:
         precio_referencia = precio_analisis if precio_analisis is not None else precio_historico
@@ -1385,9 +1398,9 @@ if analizar:
             explicacion_dcf = "No hay precio actual o valor DCF base suficiente para realizar la comparación."
 
         c1, c2, c3 = st.columns(3)
-        with c1: st.metric("🔴 Pesimista", f"${valor_pesimista:,.2f}" if valor_pesimista else "N/D")
-        with c2: st.metric("🟡 Base", f"${valor_base:,.2f}" if valor_base else "N/D")
-        with c3: st.metric("🟢 Optimista", f"${valor_optimista:,.2f}" if valor_optimista else "N/D")
+        with c1: st.metric("🔴 Pesimista", f"${valor_pesimista:,.2f}" if valor_pesimista is not None else "N/D")
+        with c2: st.metric("🟡 Base", f"${valor_base:,.2f}" if valor_base is not None else "N/D")
+        with c3: st.metric("🟢 Optimista", f"${valor_optimista:,.2f}" if valor_optimista is not None else "N/D")
 
         st.subheader("🧠 Diagnóstico de valoración")
         st.write(f"### {estado_dcf}")
