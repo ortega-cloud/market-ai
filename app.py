@@ -3376,16 +3376,16 @@ fair_value = (
 
         objetivo_medio if "objetivo_medio" in locals() else None,
 
-        eps,
+        eps if "eps" in locals() else None,
 
-        crecimiento_beneficios
+        crecimiento_beneficios if "crecimiento_beneficios" in locals() else None,
     )
 )
 
 
 estado_fair, potencial_fair = (
     diagnosticar_fair_value(
-        precio_analisis,
+        precio_analisis if "precio_analisis" in locals() else None,
         fair_value
     )
 )
