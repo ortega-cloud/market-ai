@@ -983,6 +983,697 @@ def calcular_score_riesgo(
 
 
 # =========================================================
+# FAIR VALUE COMBINADO Y RANKING
+# =========================================================
+
+def calcular_fair_value_combinado(
+    precio_actual,
+    valor_dcf,
+    objetivo_analistas,
+    eps,
+    crecimiento_beneficios
+):
+
+    valores = []
+    pesos = []
+
+    if valor_dcf is not None and valor_dcf > 0:
+
+        valores.append(
+            float(valor_dcf)
+        )
+
+        pesos.append(0.50)
+
+
+    if (
+        objetivo_analistas is not None
+        and objetivo_analistas > 0
+    ):
+
+        valores.append(
+            float(objetivo_analistas)
+        )
+
+        pesos.append(0.25)
+
+
+    if eps is not None and eps > 0:
+
+        if crecimiento_beneficios is not None:
+
+            crecimiento_pct = (
+                float(
+                    crecimiento_beneficios
+                ) * 100
+            )
+
+        else:
+
+            crecimiento_pct = 5.0
+
+
+        crecimiento_pct = max(
+            -5.0,
+            min(
+                25.0,
+                crecimiento_pct
+            )
+        )
+
+
+        pe_razonable = max(
+            10.0,
+            min(
+                30.0,
+                15.0
+                + (
+                    0.50
+                    * crecimiento_pct
+                )
+            )
+        )
+
+
+        valor_multiplo = (
+            eps
+            * pe_razonable
+        )
+
+
+        if valor_multiplo > 0:
+
+            valores.append(
+                float(valor_multiplo)
+            )
+
+            pesos.append(0.25)
+
+
+    if not valores:
+
+        return None
+
+
+    peso_total = sum(
+        pesos
+    )
+
+
+    return (
+        sum(
+            valor * peso
+            for valor, peso
+            in zip(
+                valores,
+                pesos
+            )
+        )
+        / peso_total
+    )
+
+
+def diagnosticar_fair_value(
+    precio_actual,
+    fair_value
+):
+
+    if (
+        precio_actual is None
+        or fair_value is None
+        or precio_actual <= 0
+    ):
+
+        return (
+            "⚪ SIN DATOS",
+            None
+        )
+
+
+    potencial = (
+        (
+            fair_value
+            - precio_actual
+        )
+        / precio_actual
+    ) * 100
+
+
+    if potencial >= 30:
+
+        return (
+            "🟢 MUY INFRAVALORADA",
+            potencial
+        )
+
+
+    if potencial >= 15:
+
+        return (
+            "🟢 INFRAVALORADA",
+            potencial
+        )
+
+
+    if potencial >= -10:
+
+        return (
+            "🟡 VALORACIÓN RAZONABLE",
+            potencial
+        )
+
+
+    if potencial >= -25:
+
+        return (
+            "🟠 SOBREVALORADA",
+            potencial
+        )
+
+
+    return (
+        "🔴 MUY SOBREVALORADA",
+        potencial
+    )
+
+
+# =========================================================
+# S&P 500
+# =========================================================
+
+SP500_FALLBACK = [
+    "AAPL",
+    "MSFT",
+    "NVDA",
+    "AMZN",
+    "META",
+    "GOOGL",
+    "AVGO",
+    "TSLA",
+    "JPM",
+    "LLY",
+    "V",
+    "MA",
+    "XOM",
+    "WMT",
+    "COST",
+    "NFLX",
+    "ORCL",
+    "AMD",
+    "ADBE",
+    "CRM",
+    "BAC",
+    "KO",
+    "PEP",
+    "CSCO",
+    "QCOM",
+    "TXN",
+    "GE",
+    "CAT",
+    "GS",
+    "MS"
+]
+
+
+@st.cache_data(
+    ttl=86400
+)
+def obtener_componentes_sp500():
+
+    try:
+
+        tablas = pd.read_html(
+            "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+        )
+
+
+        simbolos = (
+            tablas[0]["Symbol"]
+            .astype(str)
+            .str.replace(
+                ".",
+                "-",
+                regex=False
+            )
+            .str.strip()
+            .tolist()
+        )
+
+
+        return [
+            simbolo
+            for simbolo in simbolos
+            if simbolo
+            and simbolo != "nan"
+        ]
+
+
+    except Exception:
+
+        return SP500_FALLBACK
+
+
+def obtener_close_serie(
+    datos
+):
+
+    if (
+        isinstance(
+            datos,
+            pd.DataFrame
+        )
+        and "Close" in datos.columns
+    ):
+
+        return (
+            datos["Close"]
+            .dropna()
+        )
+
+
+    return pd.Series(
+        dtype=float
+    )
+
+
+@st.cache_data(
+    ttl=1800
+)
+def escanear_sp500(
+    candidatos_finales=20
+):
+
+    tickers = (
+        obtener_componentes_sp500()
+    )
+
+
+    try:
+
+        precios = yf.download(
+            tickers=tickers,
+            period="1y",
+            interval="1d",
+            auto_adjust=False,
+            progress=False,
+            group_by="ticker",
+            threads=True
+        )
+
+
+    except Exception:
+
+        return pd.DataFrame()
+
+
+    candidatos = []
+
+
+    for simbolo in tickers:
+
+        try:
+
+            if isinstance(
+                precios.columns,
+                pd.MultiIndex
+            ):
+
+                niveles = (
+                    precios
+                    .columns
+                    .get_level_values(0)
+                )
+
+
+                if simbolo not in niveles:
+
+                    continue
+
+
+                datos = (
+                    precios[simbolo]
+                )
+
+
+            else:
+
+                datos = precios
+
+
+            close = (
+                obtener_close_serie(
+                    datos
+                )
+            )
+
+
+            if len(close) < 60:
+
+                continue
+
+
+            precio = float(
+                close.iloc[-1]
+            )
+
+
+            ma20 = float(
+                close
+                .rolling(20)
+                .mean()
+                .iloc[-1]
+            )
+
+
+            ma50 = float(
+                close
+                .rolling(50)
+                .mean()
+                .iloc[-1]
+            )
+
+
+            if len(close) >= 200:
+
+                ma200 = float(
+                    close
+                    .rolling(200)
+                    .mean()
+                    .iloc[-1]
+                )
+
+            else:
+
+                ma200 = ma50
+
+
+            rsi = float(
+                calcular_rsi(
+                    close
+                ).iloc[-1]
+            )
+
+
+            score_tecnico = 0
+
+
+            if precio > ma20:
+
+                score_tecnico += 25
+
+
+            if precio > ma50:
+
+                score_tecnico += 25
+
+
+            if precio > ma200:
+
+                score_tecnico += 25
+
+
+            if 45 <= rsi <= 70:
+
+                score_tecnico += 15
+
+
+            elif (
+                35 <= rsi < 45
+                or
+                70 < rsi <= 78
+            ):
+
+                score_tecnico += 8
+
+
+            candidatos.append(
+                (
+                    simbolo,
+                    precio,
+                    rsi,
+                    score_tecnico
+                )
+            )
+
+
+        except Exception:
+
+            continue
+
+
+    candidatos = sorted(
+        candidatos,
+        key=lambda x: x[3],
+        reverse=True
+    )
+
+
+    candidatos = candidatos[
+        :candidatos_finales
+    ]
+
+
+    resultados = []
+
+
+    for (
+        simbolo,
+        precio,
+        rsi,
+        score_tecnico
+    ) in candidatos:
+
+        try:
+
+            info = obtener_info(
+                simbolo
+            )
+
+
+            fcf = limpiar_numero(
+                info.get(
+                    "freeCashflow"
+                )
+            )
+
+
+            deuda_total = (
+                limpiar_numero(
+                    info.get(
+                        "totalDebt"
+                    )
+                )
+            )
+
+
+            caja_total = (
+                limpiar_numero(
+                    info.get(
+                        "totalCash"
+                    )
+                )
+            )
+
+
+            acciones = (
+                limpiar_numero(
+                    info.get(
+                        "sharesOutstanding"
+                    )
+                )
+            )
+
+
+            eps = limpiar_numero(
+                info.get(
+                    "trailingEps"
+                )
+            )
+
+
+            crecimiento = (
+                limpiar_numero(
+                    info.get(
+                        "earningsGrowth"
+                    )
+                )
+            )
+
+
+            objetivo = (
+                limpiar_numero(
+                    info.get(
+                        "targetMeanPrice"
+                    )
+                )
+            )
+
+
+            pe = limpiar_numero(
+                info.get(
+                    "trailingPE"
+                )
+            )
+
+
+            valor_dcf = None
+
+
+            if (
+                fcf is not None
+                and fcf > 0
+                and acciones is not None
+                and acciones > 0
+            ):
+
+                escenarios = (
+                    calcular_escenarios_dcf(
+                        fcf,
+                        deuda=(
+                            deuda_total
+                            or 0
+                        ),
+                        caja=(
+                            caja_total
+                            or 0
+                        ),
+                        acciones=acciones
+                    )
+                )
+
+
+                dcf_base = (
+                    escenarios.get(
+                        "base"
+                    )
+                )
+
+
+                if dcf_base:
+
+                    valor_dcf = (
+                        limpiar_numero(
+                            dcf_base.get(
+                                "valor_por_accion"
+                            )
+                        )
+                    )
+
+
+            fair_value = (
+                calcular_fair_value_combinado(
+                    precio,
+                    valor_dcf,
+                    objetivo,
+                    eps,
+                    crecimiento
+                )
+            )
+
+
+            estado, potencial = (
+                diagnosticar_fair_value(
+                    precio,
+                    fair_value
+                )
+            )
+
+
+            score = float(
+                score_tecnico
+            )
+
+
+            if potencial is not None:
+
+                score += max(
+                    -20,
+                    min(
+                        35,
+                        potencial * 0.50
+                    )
+                )
+
+
+            if pe is not None:
+
+                if pe < 20:
+
+                    score += 8
+
+                elif pe < 30:
+
+                    score += 4
+
+                elif pe > 50:
+
+                    score -= 5
+
+
+            resultados.append(
+                {
+                    "Ticker": simbolo,
+
+                    "Empresa": info.get(
+                        "shortName",
+                        simbolo
+                    ),
+
+                    "Precio": precio,
+
+                    "Fair Value": fair_value,
+
+                    "Potencial %": potencial,
+
+                    "Diagnóstico": estado,
+
+                    "MARKET AI": round(
+                        max(
+                            0,
+                            min(
+                                100,
+                                score
+                            )
+                        ),
+                        1
+                    ),
+
+                    "DCF": valor_dcf,
+
+                    "Objetivo analistas": objetivo,
+
+                    "P/E": pe,
+
+                    "RSI": rsi
+                }
+            )
+
+
+        except Exception:
+
+            continue
+
+
+    if not resultados:
+
+        return pd.DataFrame()
+
+
+    return (
+        pd.DataFrame(
+            resultados
+        )
+        .sort_values(
+            "MARKET AI",
+            ascending=False
+        )
+        .reset_index(
+            drop=True
+        )
+    )
+
+
+# =========================================================
 # INTERFAZ
 # =========================================================
 
