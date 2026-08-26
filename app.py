@@ -1379,6 +1379,24 @@ if analizar:
         )
     )
 
+    deuda_total = limpiar_numero(
+        info.get(
+            "totalDebt"
+        )
+    )
+
+    caja_total = limpiar_numero(
+        info.get(
+            "totalCash"
+        )
+    )
+
+    acciones_en_circulacion = limpiar_numero(
+        info.get(
+            "sharesOutstanding"
+        )
+    )
+
     ingresos = limpiar_numero(
         info.get(
             "totalRevenue"
@@ -2336,6 +2354,146 @@ if analizar:
         st.dataframe(
             crecimiento_estimado,
             use_container_width=True
+        )
+
+
+    # =====================================================
+    # VALORACIÓN DCF
+    # =====================================================
+
+    st.divider()
+
+    st.header(
+        "💎 Valoración DCF"
+    )
+
+    st.caption(
+        "Estimación experimental del valor razonable mediante un modelo de Discounted Cash Flow (DCF)."
+    )
+
+    if (
+        flujo_caja is not None
+        and flujo_caja > 0
+        and acciones_en_circulacion is not None
+        and acciones_en_circulacion > 0
+    ):
+
+        escenarios_dcf = calcular_escenarios_dcf(
+            free_cash_flow=flujo_caja,
+            deuda=deuda_total if deuda_total is not None else 0,
+            caja=caja_total if caja_total is not None else 0,
+            acciones=acciones_en_circulacion,
+        )
+
+        dcf_pesimista = escenarios_dcf.get("pesimista")
+        dcf_base = escenarios_dcf.get("base")
+        dcf_optimista = escenarios_dcf.get("optimista")
+
+        valor_pesimista = (
+            dcf_pesimista.get("valor_por_accion")
+            if dcf_pesimista
+            else None
+        )
+        valor_base = (
+            dcf_base.get("valor_por_accion")
+            if dcf_base
+            else None
+        )
+        valor_optimista = (
+            dcf_optimista.get("valor_por_accion")
+            if dcf_optimista
+            else None
+        )
+
+        if precio_analisis is not None and valor_base is not None:
+            estado_dcf, potencial_dcf, explicacion_dcf = (
+                diagnosticar_valoracion(
+                    precio_analisis,
+                    valor_base,
+                )
+            )
+        else:
+            estado_dcf = "⚪ SIN DATOS"
+            potencial_dcf = None
+            explicacion_dcf = (
+                "No hay precio actual o valor DCF base suficiente para realizar la comparación."
+            )
+
+        c1, c2, c3 = st.columns(3)
+
+        with c1:
+            st.metric(
+                "🔴 Pesimista",
+                (
+                    f"${valor_pesimista:,.2f}"
+                    if valor_pesimista is not None
+                    else "N/D"
+                ),
+            )
+
+        with c2:
+            st.metric(
+                "🟡 Base",
+                (
+                    f"${valor_base:,.2f}"
+                    if valor_base is not None
+                    else "N/D"
+                ),
+            )
+
+        with c3:
+            st.metric(
+                "🟢 Optimista",
+                (
+                    f"${valor_optimista:,.2f}"
+                    if valor_optimista is not None
+                    else "N/D"
+                ),
+            )
+
+        st.subheader(
+            "🧠 Diagnóstico de valoración"
+        )
+
+        st.write(
+            f"### {estado_dcf}"
+        )
+
+        st.write(
+            explicacion_dcf
+        )
+
+        if potencial_dcf is not None:
+            st.metric(
+                "Potencial estimado hasta el valor DCF base",
+                f"{potencial_dcf:+.2f}%",
+            )
+
+        with st.expander(
+            "🔎 Ver parámetros utilizados por el DCF"
+        ):
+            st.write(
+                f"**Free Cash Flow:** ${flujo_caja / 1e9:.2f} B"
+            )
+            st.write(
+                f"**Deuda:** ${(deuda_total or 0) / 1e9:.2f} B"
+            )
+            st.write(
+                f"**Caja:** ${(caja_total or 0) / 1e9:.2f} B"
+            )
+            st.write(
+                f"**Acciones en circulación:** {acciones_en_circulacion / 1e9:.2f} B"
+            )
+            st.write(
+                "**Horizonte:** 5 años"
+            )
+            st.write(
+                "**Base:** crecimiento inicial 8%, crecimiento terminal 3% y tasa de descuento 10%."
+            )
+
+    else:
+        st.info(
+            "No hay suficiente Free Cash Flow o acciones en circulación para calcular el DCF de forma fiable."
         )
 
 
