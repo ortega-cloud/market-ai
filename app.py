@@ -565,9 +565,6 @@ def diagnosticar_fair_value(precio_actual, fair_value):
 
     return "🔴 MUY SOBREVALORADA", potencial
 
-# =========================================================
-# S&P 500
-# =========================================================
 
 SP500_FALLBACK = [
     "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "AVGO", "TSLA", "JPM", "LLY",
@@ -708,6 +705,306 @@ def escanear_sp500(candidatos_finales=20):
         return pd.DataFrame()
 
     return pd.DataFrame(resultados).sort_values("MARKET AI", ascending=False).reset_index(drop=True)
+
+# =========================================================
+# DIAGNÓSTICO PREDICTIVO MARKET AI
+# =========================================================
+
+def calcular_diagnostico_predictivo(
+    precio,
+    fair_value,
+    score_total,
+    score_tecnico,
+    score_valoracion,
+    score_fundamentales,
+    score_crecimiento,
+    score_riesgo,
+    rsi,
+    ma20,
+    ma50,
+    ma200,
+    objetivo_analistas=None
+):
+
+    señales = []
+    riesgos = []
+
+    # =====================================================
+    # VALORACIÓN
+    # =====================================================
+
+    potencial_fair = None
+
+    if (
+        precio is not None
+        and fair_value is not None
+        and precio > 0
+    ):
+
+        potencial_fair = (
+            (fair_value - precio)
+            / precio
+        ) * 100
+
+        if potencial_fair >= 20:
+            señales.append(
+                "La acción presenta un descuento importante "
+                "respecto al Fair Value."
+            )
+        elif potencial_fair >= 10:
+            señales.append(
+                "La acción presenta un descuento moderado "
+                "respecto al Fair Value."
+            )
+        elif potencial_fair <= -20:
+            riesgos.append(
+                "El precio está muy por encima "
+                "del Fair Value estimado."
+            )
+        elif potencial_fair <= -10:
+            riesgos.append(
+                "El precio está por encima "
+                "del Fair Value estimado."
+            )
+
+    # =====================================================
+    # TENDENCIA
+    # =====================================================
+
+    tendencia = "LATERAL"
+
+    if (
+        ma20 is not None
+        and ma50 is not None
+        and ma200 is not None
+    ):
+        if (
+            precio > ma20
+            and ma20 > ma50
+            and ma50 > ma200
+        ):
+            tendencia = "ALCISTA"
+            señales.append(
+                "La estructura de medias móviles "
+                "confirma una tendencia alcista."
+            )
+        elif (
+            precio < ma20
+            and ma20 < ma50
+            and ma50 < ma200
+        ):
+            tendencia = "BAJISTA"
+            riesgos.append(
+                "Las medias móviles muestran "
+                "una estructura bajista."
+            )
+        else:
+            tendencia = "LATERAL"
+            señales.append(
+                "Las medias móviles no muestran "
+                "una tendencia claramente definida."
+            )
+
+    # =====================================================
+    # RSI
+    # =====================================================
+
+    situacion_rsi = "NEUTRAL"
+
+    if rsi is not None:
+        if rsi >= 75:
+            situacion_rsi = "SOBRECOMPRA"
+            riesgos.append(
+                "El RSI indica una situación "
+                "de sobrecompra."
+            )
+        elif rsi <= 30:
+            situacion_rsi = "SOBREVENTA"
+            señales.append(
+                "El RSI indica una situación "
+                "de sobreventa."
+            )
+        elif 45 <= rsi <= 70:
+            situacion_rsi = "SALUDABLE"
+            señales.append(
+                "El RSI se encuentra en una zona "
+                "relativamente saludable."
+            )
+
+    # =====================================================
+    # FUNDAMENTALES
+    # =====================================================
+
+    if score_fundamentales >= 20:
+        señales.append("Los fundamentales son sólidos.")
+    elif score_fundamentales < 12:
+        riesgos.append("Los fundamentales presentan varias señales débiles.")
+
+    # =====================================================
+    # CRECIMIENTO
+    # =====================================================
+
+    if score_crecimiento >= 12:
+        señales.append(
+            "El crecimiento de ingresos y beneficios "
+            "es favorable."
+        )
+    elif score_crecimiento < 7:
+        riesgos.append(
+            "El crecimiento de la empresa "
+            "es limitado o débil."
+        )
+
+    # =====================================================
+    # RIESGO
+    # =====================================================
+
+    if score_riesgo <= 4:
+        riesgos.append(
+            "El nivel de riesgo estimado "
+            "es relativamente elevado."
+        )
+    elif score_riesgo >= 8:
+        señales.append("El perfil de riesgo es relativamente favorable.")
+
+    # =====================================================
+    # OBJETIVO DE ANALISTAS
+    # =====================================================
+
+    potencial_analistas = None
+
+    if (
+        objetivo_analistas is not None
+        and precio is not None
+        and precio > 0
+    ):
+        potencial_analistas = (
+            (objetivo_analistas - precio) / precio
+        ) * 100
+
+        if potencial_analistas >= 15:
+            señales.append(
+                "El objetivo medio de los analistas "
+                "implica un potencial relevante."
+            )
+        elif potencial_analistas <= -10:
+            riesgos.append(
+                "El objetivo medio de los analistas "
+                "está por debajo del precio actual."
+            )
+
+    # =====================================================
+    # DIRECCIÓN PROBABLE
+    # =====================================================
+
+    puntos_alcistas = 0
+    puntos_bajistas = 0
+
+    if tendencia == "ALCISTA":
+        puntos_alcistas += 3
+    elif tendencia == "BAJISTA":
+        puntos_bajistas += 3
+
+    if potencial_fair is not None:
+        if potencial_fair >= 15:
+            puntos_alcistas += 3
+        elif potencial_fair >= 5:
+            puntos_alcistas += 1
+        elif potencial_fair <= -15:
+            puntos_bajistas += 3
+        elif potencial_fair <= -5:
+            puntos_bajistas += 1
+
+    if score_fundamentales >= 20:
+        puntos_alcistas += 2
+    elif score_fundamentales < 12:
+        puntos_bajistas += 2
+
+    if score_crecimiento >= 12:
+        puntos_alcistas += 2
+    elif score_crecimiento < 7:
+        puntos_bajistas += 1
+
+    if rsi is not None:
+        if rsi <= 30:
+            puntos_alcistas += 1
+        elif rsi >= 75:
+            puntos_bajistas += 1
+
+    if potencial_analistas is not None:
+        if potencial_analistas >= 15:
+            puntos_alcistas += 2
+        elif potencial_analistas <= -10:
+            puntos_bajistas += 2
+
+    if puntos_alcistas >= puntos_bajistas + 3:
+        direccion = "🟢 ALCISTA"
+    elif puntos_bajistas >= puntos_alcistas + 3:
+        direccion = "🔴 BAJISTA"
+    else:
+        direccion = "🟡 LATERAL / INCIERTA"
+
+    # =====================================================
+    # HORIZONTE
+    # =====================================================
+
+    if (
+        potencial_fair is not None
+        and potencial_fair >= 20
+        and tendencia == "ALCISTA"
+    ):
+        horizonte = "3–9 meses"
+    elif (
+        potencial_fair is not None
+        and potencial_fair >= 10
+    ):
+        horizonte = "3–12 meses"
+    elif (
+        tendencia == "ALCISTA"
+        and score_total >= 70
+    ):
+        horizonte = "1–6 meses"
+    elif tendencia == "BAJISTA":
+        horizonte = "1–6 meses"
+    else:
+        horizonte = "1–12 meses"
+
+    # =====================================================
+    # SEÑAL FINAL
+    # =====================================================
+
+    if score_total >= 85:
+        señal = "🟢 COMPRA"
+    elif score_total >= 70:
+        señal = "🟢 COMPRA MODERADA"
+    elif score_total >= 55:
+        señal = "🟡 MANTENER"
+    elif score_total >= 40:
+        señal = "🟠 ESPERAR"
+    else:
+        señal = "🔴 EVITAR"
+
+    # Ajuste por valoración extrema
+    if (
+        potencial_fair is not None
+        and potencial_fair <= -25
+        and señal in ["🟢 COMPRA", "🟢 COMPRA MODERADA"]
+    ):
+        señal = "🟡 MANTENER"
+
+    return {
+        "direccion": direccion,
+        "tendencia": tendencia,
+        "rsi": situacion_rsi,
+        "horizonte": horizonte,
+        "señal": señal,
+        "potencial_fair": potencial_fair,
+        "potencial_analistas": potencial_analistas,
+        "señales": señales,
+        "riesgos": riesgos,
+        "puntos_alcistas": puntos_alcistas,
+        "puntos_bajistas": puntos_bajistas
+    }
 
 # =========================================================
 # INTERFAZ (SIDEBAR)
@@ -1130,7 +1427,90 @@ if analizar:
     st.write(f"### {estado_fair}")
     st.info("El Fair Value es una estimación experimental y no constituye asesoramiento financiero.")
 
-    # Diagnóstico General
+    # =====================================================
+    # DIAGNÓSTICO PREDICTIVO (BLOQUE 2 INTEGRADO)
+    # =====================================================
+
+    st.divider()
+    st.header("🔮 Diagnóstico predictivo MARKET AI")
+
+    diagnostico = calcular_diagnostico_predictivo(
+        precio_analisis,
+        fair_value,
+        score_total,
+        score_tecnico,
+        score_valoracion,
+        score_fundamentales,
+        score_crecimiento,
+        score_riesgo,
+        rsi,
+        ma20,
+        ma50,
+        ma200,
+        objetivo_medio
+    )
+
+    # RESUMEN PRINCIPAL
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Dirección probable", diagnostico["direccion"])
+    with col2:
+        st.metric("Señal", diagnostico["señal"])
+    with col3:
+        st.metric("Horizonte", diagnostico["horizonte"])
+    with col4:
+        potencial = diagnostico["potencial_fair"]
+        st.metric(
+            "Potencial Fair Value",
+            f"{potencial:+.2f}%" if potencial is not None else "N/D"
+        )
+
+    # DIAGNÓSTICO EN LENGUAJE NATURAL
+    st.subheader("🧠 ¿Qué está viendo MARKET AI?")
+    direccion_texto = diagnostico["direccion"]
+    tendencia_texto = diagnostico["tendencia"]
+    rsi_texto = diagnostico["rsi"]
+    señal_texto = diagnostico["señal"]
+    horizonte_texto = diagnostico["horizonte"]
+
+    if potencial is not None:
+        potencial_texto = f"{potencial:+.1f}%"
+    else:
+        potencial_texto = "no disponible"
+
+    st.write(f"""
+**{ticker}** presenta actualmente una dirección probable **{direccion_texto}**.
+
+La tendencia técnica es **{tendencia_texto}** y el RSI se encuentra en una situación **{rsi_texto}**.
+
+El Fair Value estima un potencial de **{potencial_texto}** respecto al precio actual.
+
+Teniendo en cuenta el conjunto de factores, MARKET AI establece actualmente una señal de **{señal_texto}**.
+
+El horizonte orientativo del modelo es de **{horizonte_texto}**.
+""")
+
+    # SEÑALES POSITIVAS
+    if diagnostico["señales"]:
+        st.subheader("🟢 Factores favorables")
+        for razon in diagnostico["señales"]:
+            st.write(f"✓ {razon}")
+
+    # RIESGOS
+    if diagnostico["riesgos"]:
+        st.subheader("⚠️ Riesgos detectados")
+        for riesgo in diagnostico["riesgos"]:
+            st.write(f"• {riesgo}")
+
+    # FUERZA DE LA SEÑAL
+    st.subheader("⚖️ Balance de señales")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.metric("Presión alcista", diagnostico["puntos_alcistas"])
+    with c2:
+        st.metric("Presión bajista", diagnostico["puntos_bajistas"])
+
+    # Diagnóstico General Estático
     st.divider()
     st.header("🧠 Diagnóstico de MARKET AI")
 
