@@ -616,16 +616,24 @@ if ticker_input:
         g_c2.metric("Crecimiento Beneficios", f"{crecimiento_beneficios*100:+.2f}%" if crecimiento_beneficios else "N/D")
         g_c3.metric("Dividend Yield", f"{info.get('dividendYield')*100:.2f}%" if info.get('dividendYield') else "N/D")
 
-        # Sección DCF (Indentación corregida y validación segura contra None)
-        if escenarios_dcf:
+       # Sección DCF (Defensiva contra tipos de datos inesperados en datos_esc)
+        if escenarios_dcf and isinstance(escenarios_dcf, dict):
             st.header("🧮 Valoración DCF (Descuento de Flujos de Caja)")
             dcf_cols = st.columns(len(escenarios_dcf))
             idx = 0
             for nombre_esc, datos_esc in escenarios_dcf.items():
                 with dcf_cols[idx]:
-                    st.subheader(f"Caso {nombre_esc.capitalize()}")
-                    val_accion = datos_esc.get('valor_por_accion')
-                    if val_accion is not None and not np.isnan(val_accion):
+                    st.subheader(f"Caso {str(nombre_esc).capitalize()}")
+                    
+                    # Extraer el valor según el tipo de estructura devuelta
+                    val_accion = None
+                    if isinstance(datos_esc, dict):
+                        val_accion = datos_esc.get('valor_por_accion')
+                    elif isinstance(datos_esc, (int, float)):
+                        val_accion = datos_esc
+
+                    # Renderizado seguro
+                    if val_accion is not None and isinstance(val_accion, (int, float)) and not np.isnan(val_accion):
                         st.metric("Fair Value", f"${val_accion:,.2f}")
                         pot = ((val_accion - precio_analisis) / precio_analisis) * 100 if precio_analisis else None
                         st.metric("Potencial", f"{pot:+.1f}%" if pot is not None else "N/D")
@@ -633,7 +641,7 @@ if ticker_input:
                         st.metric("Fair Value", "N/D")
                         st.metric("Potencial", "N/D")
                 idx += 1
-
+       
         # Sección Analistas
         st.header("🎯 Analistas")
         a_c1, a_c2, a_c3, a_c4 = st.columns(4)
