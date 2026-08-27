@@ -22,7 +22,7 @@ st.set_page_config(page_title="MARKET AI - Análisis de Acciones", layout="wide"
 FINNHUB_API_KEY = os.environ.get("FINNHUB_API_KEY", "")
 
 # =========================================================
-# FUNCIONES AUXILIARES Y OBTENCIÓN DE DATOS (CORREGIDAS PARA CACHÉ)
+# FUNCIONES AUXILIARES Y OBTENCIÓN DE DATOS
 # =========================================================
 
 @st.cache_data(ttl=3600)
@@ -38,7 +38,7 @@ def obtener_info_accion(ticker_symbol):
 
 @st.cache_data(ttl=1800)
 def obtener_historico(ticker_symbol, periodo="1y"):
-    """Descarga datos históricos usando el símbolo del ticker para evitar serializar objetos de yfinance"""
+    """Descarga datos históricos usando el símbolo del ticker"""
     try:
         ticker = yf.Ticker(ticker_symbol)
         df = ticker.history(period=periodo)
@@ -116,26 +116,19 @@ def obtener_estimaciones_eps(ticker_symbol):
 
 
 # =========================================================
-# MOTOR CENTRAL DE DIAGNÓSTICO MARKET AI (ÚNICO SISTEMA SCORE)
+# MOTOR CENTRAL DE DIAGNÓSTICO MARKET AI
 # =========================================================
 
 def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos_analistas):
     """
     Motor central de diagnóstico e interpretación.
-    Distribución estricta de puntos (Máximo 100):
-      - Técnico: <= 25
-      - Valoración: <= 25
-      - Fundamentales: <= 25
-      - Crecimiento: <= 15
-      - Riesgo: <= 10
-    Manejo seguro de datos faltantes (None / NaN) sin inventar cifras.
+    Distribución de puntos (Máximo 100):
+      - Técnico: <= 25 | Valoración: <= 25 | Fundamentales: <= 25 | Crecimiento: <= 15 | Riesgo: <= 10
     """
     pts_tec, pts_val, pts_fund, pts_crec, pts_riesgo = 0.0, 0.0, 0.0, 0.0, 0.0
     pos, neg, riesgos, catalizadores = [], [], [], []
 
-    # ---------------------------------------------------------
     # 1. ANÁLISIS TÉCNICO (MÁX 25 PTS)
-    # ---------------------------------------------------------
     precio = datos_tec.get("precio")
     ma20 = datos_tec.get("ma20")
     ma50 = datos_tec.get("ma50")
@@ -145,7 +138,6 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
 
     tendencia_str = "Neutral / Indeterminada"
     
-    # Tendencia Corto/Medio Plazo (MA20 y MA50)
     if precio is not None and ma20 is not None and ma50 is not None:
         if precio > ma20 and ma20 > ma50:
             pts_tec += 8.0
@@ -157,7 +149,6 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
         else:
             pts_tec += 4.0
 
-    # Tendencia Largo Plazo (MA200)
     if precio is not None and ma200 is not None:
         if precio > ma200:
             pts_tec += 7.0
@@ -167,7 +158,6 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
         else:
             neg.append("El precio cotiza por debajo de la media móvil de 200 periodos (tendencia principal débil).")
 
-    # RSI
     if rsi is not None and not np.isnan(rsi):
         if 40 <= rsi <= 65:
             pts_tec += 6.0
@@ -181,7 +171,6 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
         else:
             pts_tec += 3.0
 
-    # Momentum / Variación diaria
     if momentum is not None and not np.isnan(momentum):
         if momentum > 3.0:
             pts_tec += 4.0
@@ -193,9 +182,7 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
 
     pts_tec = min(25.0, max(0.0, pts_tec))
 
-    # ---------------------------------------------------------
     # 2. VALORACIÓN (MÁX 25 PTS)
-    # ---------------------------------------------------------
     fair_value = datos_val.get("valor_dcf_base")
     obj_med = datos_analistas.get("obj_med")
     pe = datos_val.get("pe")
@@ -206,7 +193,6 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
     potencial_dcf = ((fair_value - precio) / precio * 100.0) if (fair_value is not None and precio and precio > 0) else None
     potencial_analistas = ((obj_med - precio) / precio * 100.0) if (obj_med is not None and precio and precio > 0) else None
 
-    # Evaluación DCF
     if potencial_dcf is not None:
         if potencial_dcf >= 20.0:
             pts_val += 9.0
@@ -220,7 +206,6 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
     else:
         pts_val += 4.0
 
-    # Evaluación Consenso de Analistas
     if potencial_analistas is not None:
         if potencial_analistas >= 15.0:
             pts_val += 4.0
@@ -231,7 +216,6 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
     else:
         pts_val += 2.0
 
-    # PER / Forward PER
     mult_pe = forward_pe if forward_pe is not None else pe
     if mult_pe is not None and mult_pe > 0:
         if mult_pe < 15.0:
@@ -242,7 +226,6 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
         else:
             neg.append(f"Múltiplo PER exigente ({mult_pe:.1f}x).")
 
-    # PEG Ratio
     if peg is not None and peg > 0:
         if peg < 1.0:
             pts_val += 4.0
@@ -251,13 +234,11 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
         elif peg < 2.0:
             pts_val += 2.0
 
-    # Price / Book
     if pb is not None and pb > 0 and pb < 3.0:
         pts_val += 3.0
 
     pts_val = min(25.0, max(0.0, pts_val))
 
-    # Determinación del Estado de Valoración Global
     if potencial_dcf is not None:
         if potencial_dcf >= 15.0:
             est_val = "🟢 INFRAVALORADA"
@@ -275,9 +256,7 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
     else:
         est_val = "🟡 RAZONABLEMENTE VALORADA"
 
-    # ---------------------------------------------------------
     # 3. FUNDAMENTALES (MÁX 25 PTS)
-    # ---------------------------------------------------------
     roe = datos_fund.get("roe")
     margen = datos_fund.get("margen")
     deuda = datos_fund.get("deuda")
@@ -333,9 +312,7 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
     else:
         calidad_fund = "Débiles"
 
-    # ---------------------------------------------------------
     # 4. CRECIMIENTO (MÁX 15 PTS)
-    # ---------------------------------------------------------
     crec_ing = datos_crec.get("crecimiento_ingresos")
     crec_ben = datos_crec.get("crecimiento_beneficios")
     div_yield = datos_crec.get("dividend_yield")
@@ -380,9 +357,7 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
     else:
         nivel_crec = "Estancamiento"
 
-    # ---------------------------------------------------------
-    # 5. RIESGO (MÁX 10 PTS) - Medición de Estabilidad
-    # ---------------------------------------------------------
+    # 5. RIESGO (MÁX 10 PTS)
     vol = datos_tec.get("volatilidad")
 
     if vol is not None and not np.isnan(vol):
@@ -409,9 +384,7 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
 
     pts_riesgo = min(10.0, max(0.0, pts_riesgo))
 
-    # ---------------------------------------------------------
-    # SCORE FINAL GLOBAL Y CLASIFICACIÓN
-    # ---------------------------------------------------------
+    # SCORE FINAL
     score_total = min(100.0, max(0.0, pts_tec + pts_val + pts_fund + pts_crec + pts_riesgo))
 
     if score_total >= 85.0:
@@ -459,7 +432,6 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
 
 st.title("📈 MARKET AI - Terminal de Análisis Financiero")
 
-# Sidebar
 st.sidebar.header("🔍 Búsqueda de Activo")
 ticker_input = st.sidebar.text_input("Símbolo Ticker (ej: AAPL, MSFT, NVDA, GOOGL):", value="AAPL").upper().strip()
 
@@ -467,7 +439,6 @@ if ticker_input:
     info = obtener_info_accion(ticker_input)
     
     if info:
-        # Instanciar el objeto ticker directamente en el ámbito local
         ticker_obj = yf.Ticker(ticker_input)
         
         nombre = info.get("longName", ticker_input)
@@ -477,10 +448,8 @@ if ticker_input:
         st.subheader(f"{nombre} ({ticker_input})")
         st.caption(f"**Sector:** {sector} | **Industria:** {industria}")
 
-        # Datos históricos pasándole el símbolo directamente a la función en caché
         df_hist = obtener_historico(ticker_input)
         
-        # Extracción de variables
         precio_analisis = info.get("currentPrice") or info.get("regularMarketPrice")
         if (precio_analisis is None) and df_hist is not None and not df_hist.empty:
             precio_analisis = float(df_hist['Close'].iloc[-1])
@@ -498,7 +467,6 @@ if ticker_input:
             variacion = None
             volatilidad = None
 
-        # Variables de valoración y fundamentales
         pe = info.get("trailingPE")
         forward_pe = info.get("forwardPE")
         peg = info.get("pegRatio")
@@ -514,11 +482,9 @@ if ticker_input:
         crecimiento_ingresos = info.get("revenueGrowth")
         crecimiento_beneficios = info.get("earningsGrowth")
 
-        # Cargar Objetivos de Analistas
         objetivos = obtener_objetivos_analistas(ticker_input)
         obj_med = objetivos.get("mean")
 
-        # Ejecución del Modelo DCF si existe el módulo
         escenarios_dcf = None
         valor_dcf_base = None
         if dcf is not None:
@@ -529,9 +495,6 @@ if ticker_input:
             except Exception:
                 pass
 
-        # ---------------------------------------------------------
-        # EJECUCIÓN CENTRAL DEL MOTOR MARKET AI
-        # ---------------------------------------------------------
         datos_tec_in = {
             "precio": precio_analisis, "ma20": ma20, "ma50": ma50, "ma200": ma200,
             "rsi": rsi, "volatilidad": volatilidad, "variacion": variacion
@@ -556,9 +519,6 @@ if ticker_input:
         res_market_ai = calcular_market_ai_score(datos_tec_in, datos_val_in, datos_fund_in, datos_crec_in, datos_analistas_in)
         diag = res_market_ai["diagnostico"]
 
-        # =========================================================
-        # RENDEREADO: 1. MARKET AI SCORE
-        # =========================================================
         st.divider()
         st.header("🎯 MARKET AI SCORE")
         
@@ -578,9 +538,6 @@ if ticker_input:
             )
             st.progress(res_market_ai['score_total'] / 100)
 
-        # =========================================================
-        # RENDEREADO: 2. DIAGNÓSTICO DE MARKET AI
-        # =========================================================
         st.subheader("🧠 DIAGNÓSTICO DE MARKET AI")
         
         m_col1, m_col2, m_col3, m_col4, m_col5 = st.columns(5)
@@ -613,10 +570,6 @@ if ticker_input:
             for item in diag["riesgos"]:
                 st.write(f"- {item}")
 
-        # =========================================================
-        # SECCIONES ORIGINALES EXISTENTES (COMPLETAMENTE MANTENIDAS)
-        # =========================================================
-        
         st.divider()
 
         # Gráfico Histórico
@@ -663,29 +616,25 @@ if ticker_input:
         g_c2.metric("Crecimiento Beneficios", f"{crecimiento_beneficios*100:+.2f}%" if crecimiento_beneficios else "N/D")
         g_c3.metric("Dividend Yield", f"{info.get('dividendYield')*100:.2f}%" if info.get('dividendYield') else "N/D")
 
-        # Sección DCF
+        # Sección DCF (Indentación corregida y validación segura contra None)
         if escenarios_dcf:
-        st.header("🧮 Valoración DCF (Descuento de Flujos de Caja)")
-        dcf_cols = st.columns(len(escenarios_dcf))
-        idx = 0
-        for nombre_esc, datos_esc in escenarios_dcf.items():
-        with dcf_cols[idx]:
-        st.subheader(f"Caso {nombre_esc.capitalize()}")
-            
-        # Obtención segura del valor intrínseco
-        val_accion = datos_esc.get('valor_por_accion')
-            
-        if val_accion is not None and not np.isnan(val_accion):
-        st.metric("Fair Value", f"${val_accion:,.2f}")
-        pot = ((val_accion - precio_analisis) / precio_analisis) * 100 if precio_analisis else None
-        st.metric("Potencial", f"{pot:+.1f}%" if pot is not None else "N/D")
-        else:
-        st.metric("Fair Value", "N/D")
-        st.metric("Potencial", "N/D")
-                
-        idx += 1
+            st.header("🧮 Valoración DCF (Descuento de Flujos de Caja)")
+            dcf_cols = st.columns(len(escenarios_dcf))
+            idx = 0
+            for nombre_esc, datos_esc in escenarios_dcf.items():
+                with dcf_cols[idx]:
+                    st.subheader(f"Caso {nombre_esc.capitalize()}")
+                    val_accion = datos_esc.get('valor_por_accion')
+                    if val_accion is not None and not np.isnan(val_accion):
+                        st.metric("Fair Value", f"${val_accion:,.2f}")
+                        pot = ((val_accion - precio_analisis) / precio_analisis) * 100 if precio_analisis else None
+                        st.metric("Potencial", f"{pot:+.1f}%" if pot is not None else "N/D")
+                    else:
+                        st.metric("Fair Value", "N/D")
+                        st.metric("Potencial", "N/D")
+                idx += 1
 
-        # Sección Analistas, Consenso, Cambios y Estimaciones
+        # Sección Analistas
         st.header("🎯 Analistas")
         a_c1, a_c2, a_c3, a_c4 = st.columns(4)
         a_c1.metric("Objetivo Mínimo", f"${objetivos.get('low'):,.2f}" if objetivos.get('low') else "N/D")
