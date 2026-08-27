@@ -665,16 +665,25 @@ if ticker_input:
 
         # Sección DCF
         if escenarios_dcf:
-            st.header("🧮 Valoración DCF (Descuento de Flujos de Caja)")
-            dcf_cols = st.columns(len(escenarios_dcf))
-            idx = 0
-            for nombre_esc, datos_esc in escenarios_dcf.items():
-                with dcf_cols[idx]:
-                    st.subheader(f"Caso {nombre_esc.capitalize()}")
-                    st.metric("Fair Value", f"${datos_esc.get('valor_por_accion', 0):,.2f}")
-                    pot = ((datos_esc.get('valor_por_accion', 0) - precio_analisis) / precio_analisis) * 100 if precio_analisis else 0
-                    st.metric("Potencial", f"{pot:+.1f}%")
-                idx += 1
+        st.header("🧮 Valoración DCF (Descuento de Flujos de Caja)")
+        dcf_cols = st.columns(len(escenarios_dcf))
+        idx = 0
+        for nombre_esc, datos_esc in escenarios_dcf.items():
+        with dcf_cols[idx]:
+        st.subheader(f"Caso {nombre_esc.capitalize()}")
+            
+        # Obtención segura del valor intrínseco
+        val_accion = datos_esc.get('valor_por_accion')
+            
+        if val_accion is not None and not np.isnan(val_accion):
+        st.metric("Fair Value", f"${val_accion:,.2f}")
+        pot = ((val_accion - precio_analisis) / precio_analisis) * 100 if precio_analisis else None
+        st.metric("Potencial", f"{pot:+.1f}%" if pot is not None else "N/D")
+        else:
+        st.metric("Fair Value", "N/D")
+        st.metric("Potencial", "N/D")
+                
+        idx += 1
 
         # Sección Analistas, Consenso, Cambios y Estimaciones
         st.header("🎯 Analistas")
