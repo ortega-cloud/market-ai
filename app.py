@@ -22,23 +22,26 @@ st.set_page_config(page_title="MARKET AI - Análisis de Acciones", layout="wide"
 FINNHUB_API_KEY = os.environ.get("FINNHUB_API_KEY", "")
 
 # =========================================================
-# FUNCIONES AUXILIARES Y OBTENCIÓN DE DATOS (MANTENIDAS INTACTAS)
+# FUNCIONES AUXILIARES Y OBTENCIÓN DE DATOS (CORREGIDAS PARA CACHÉ)
 # =========================================================
 
 @st.cache_data(ttl=3600)
 def obtener_info_accion(ticker_symbol):
+    """Devuelve únicamente el diccionario info (serializable para @st.cache_data)"""
     try:
         ticker = yf.Ticker(ticker_symbol)
         info = ticker.info
-        return info, ticker
+        return info
     except Exception as e:
         st.error(f"Error al obtener datos de Yahoo Finance: {e}")
-        return None, None
+        return None
 
 @st.cache_data(ttl=1800)
-def obtener_historico(ticker_obj, periodo="1y"):
+def obtener_historico(ticker_symbol, periodo="1y"):
+    """Descarga datos históricos usando el símbolo del ticker para evitar serializar objetos de yfinance"""
     try:
-        df = ticker_obj.history(period=periodo)
+        ticker = yf.Ticker(ticker_symbol)
+        df = ticker.history(period=periodo)
         if df.empty:
             return None
         # Cálculo de indicadores técnicos
@@ -60,7 +63,6 @@ def obtener_historico(ticker_obj, periodo="1y"):
 @st.cache_data(ttl=3600)
 def obtener_objetivos_analistas(ticker_symbol):
     objetivos = {}
-    # Intentar Yahoo Finance primero
     try:
         ticker = yf.Ticker(ticker_symbol)
         info = ticker.info
@@ -75,7 +77,6 @@ def obtener_objetivos_analistas(ticker_symbol):
     except Exception:
         pass
 
-    # Fallback Finnhub si hay API Key
     if FINNHUB_API_KEY:
         try:
             url = f"https://finnhub.io/api/v1/stock/price-target?symbol={ticker_symbol}&token={FINNHUB_API_KEY}"
@@ -92,9 +93,10 @@ def obtener_objetivos_analistas(ticker_symbol):
     return objetivos
 
 @st.cache_data(ttl=3600)
-def obtener_recomendaciones_analistas(ticker_obj):
+def obtener_recomendaciones_analistas(ticker_symbol):
     try:
-        rec = ticker_obj.recommendations
+        ticker = yf.Ticker(ticker_symbol)
+        rec = ticker.recommendations
         if rec is not None and not rec.empty:
             return rec
     except Exception:
@@ -102,9 +104,10 @@ def obtener_recomendaciones_analistas(ticker_obj):
     return None
 
 @st.cache_data(ttl=3600)
-def obtener_estimaciones_eps(ticker_obj):
+def obtener_estimaciones_eps(ticker_symbol):
     try:
-        eps_est = ticker_obj.earnings_estimate
+        ticker = yf.Ticker(ticker_symbol)
+        eps_est = ticker.earnings_estimate
         if eps_est is not None and not eps_est.empty:
             return eps_est
     except Exception:
@@ -215,7 +218,7 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
         else:
             neg.append(f"Sobrevaloración estimada del {abs(potencial_dcf):.1f}% respecto a su DCF.")
     else:
-        pts_val += 4.0  # Asignación neutral para no penalizar si el DCF no aplica
+        pts_val += 4.0
 
     # Evaluación Consenso de Analistas
     if potencial_analistas is not None:
@@ -226,7 +229,7 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
         elif potencial_analistas >= 0:
             pts_val += 2.0
     else:
-        pts_val += 2.0  # Asignación neutral si no hay datos de analistas
+        pts_val += 2.0
 
     # PER / Forward PER
     mult_pe = forward_pe if forward_pe is not None else pe
@@ -323,7 +326,6 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
 
     pts_fund = min(25.0, max(0.0, pts_fund))
 
-    # Diagnóstico Cualitativo de Fundamentales
     if fund_eval_pts >= 5:
         calidad_fund = "Fuertes"
     elif fund_eval_pts >= 3:
@@ -369,7 +371,6 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
 
     pts_crec = min(15.0, max(0.0, pts_crec))
 
-    # Diagnóstico Cualitativo de Crecimiento
     if crec_eval_pts >= 3:
         nivel_crec = "Crecimiento fuerte"
     elif crec_eval_pts >= 1:
@@ -394,14 +395,12 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
             neg.append(f"Elevada volatilidad anualizada ({vol:.1f}%).")
             riesgos.append("Alta volatilidad en la cotización diaria.")
 
-    # Riesgo por Deuda Extrema (no duplicado con fundamentales)
     if deuda is not None and not np.isnan(deuda):
         if deuda < 100.0:
             pts_riesgo += 3.0
         elif deuda > 180.0:
             riesgos.append("Riesgo financiero latente por elevado nivel de endeudamiento.")
 
-    # Riesgo por Extremos Técnicos
     if rsi is not None and not np.isnan(rsi):
         if 30 <= rsi <= 70:
             pts_riesgo += 3.0
@@ -465,9 +464,12 @@ st.sidebar.header("🔍 Búsqueda de Activo")
 ticker_input = st.sidebar.text_input("Símbolo Ticker (ej: AAPL, MSFT, NVDA, GOOGL):", value="AAPL").upper().strip()
 
 if ticker_input:
-    info, ticker_obj = obtener_info_accion(ticker_input)
+    info = obtener_info_accion(ticker_input)
     
-    if info and ticker_obj:
+    if info:
+        # Instanciar el objeto ticker directamente en el ámbito local
+        ticker_obj = yf.Ticker(ticker_input)
+        
         nombre = info.get("longName", ticker_input)
         sector = info.get("sector", "N/D")
         industria = info.get("industry", "N/D")
@@ -475,10 +477,10 @@ if ticker_input:
         st.subheader(f"{nombre} ({ticker_input})")
         st.caption(f"**Sector:** {sector} | **Industria:** {industria}")
 
-        # Datos históricos
-        df_hist = obtener_historico(ticker_obj)
+        # Datos históricos pasándole el símbolo directamente a la función en caché
+        df_hist = obtener_historico(ticker_input)
         
-        # Extracción de variables existentes
+        # Extracción de variables
         precio_analisis = info.get("currentPrice") or info.get("regularMarketPrice")
         if (precio_analisis is None) and df_hist is not None and not df_hist.empty:
             precio_analisis = float(df_hist['Close'].iloc[-1])
@@ -687,14 +689,14 @@ if ticker_input:
             st.info(f"**Recomendación de Consenso:** {objetivos.get('consensus')} (Basado en {objetivos.get('num_analistas', 'N/D')} opiniones)")
 
         st.subheader("🔄 Cambios Recientes de Analistas")
-        rec_df = obtener_recomendaciones_analistas(ticker_obj)
+        rec_df = obtener_recomendaciones_analistas(ticker_input)
         if rec_df is not None and not rec_df.empty:
             st.dataframe(rec_df.tail(10), use_container_width=True)
         else:
-            st.write("No hay registros recientes de revisiones disponible.")
+            st.write("No hay registros recientes de revisiones disponibles.")
 
         st.subheader("🔮 Estimaciones de Analistas")
-        eps_df = obtener_estimaciones_eps(ticker_obj)
+        eps_df = obtener_estimaciones_eps(ticker_input)
         if eps_df is not None and not eps_df.empty:
             st.dataframe(eps_df, use_container_width=True)
         else:
