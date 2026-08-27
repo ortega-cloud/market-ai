@@ -138,7 +138,7 @@ def obtener_info(ticker):
         except Exception:
             pass
 
-        # Variables de DataFrame inicializadas para cálculos posteriores
+        # Variables de DataFrame para estados financieros
         income = pd.DataFrame()
         balance = pd.DataFrame()
         cashflow = pd.DataFrame()
@@ -240,7 +240,49 @@ def obtener_info(ticker):
             except Exception:
                 pass
 
-        # RATIOS CALCULADOS SI YAHOO NO LOS ENTREGA
+        # 7. VALORACIÓN Y RATIOS CON FALLBACKS DE YFINANCE
+        pe = limpiar_numero(info.get("trailingPE"))
+        forward_pe = limpiar_numero(info.get("forwardPE"))
+        peg = limpiar_numero(info.get("pegRatio"))
+        price_to_book = limpiar_numero(info.get("priceToBook"))
+
+        # Fallback: valoración actual de Yahoo mediante get_valuation_measures()
+        try:
+            valuation = empresa.get_valuation_measures(
+                freq="trailing",
+                periods=0
+            )
+
+            if valuation is not None and not valuation.empty:
+                col = "Current" if "Current" in valuation.columns else valuation.columns[0]
+
+                if pe is None and "P/E" in valuation.index:
+                    pe = limpiar_numero(valuation.loc["P/E", col])
+
+                if price_to_book is None and "P/B" in valuation.index:
+                    price_to_book = limpiar_numero(valuation.loc["P/B", col])
+        except Exception:
+            pass
+
+        # Forward PE: intentar también desde info/valuation sin inventarlo
+        if forward_pe is None:
+            forward_pe = limpiar_numero(info.get("forwardPE"))
+
+        # PEG: Yahoo puede no entregarlo; NO inventarlo
+        if peg is None:
+            try:
+                growth = limpiar_numero(info.get("earningsGrowth"))
+                if pe is not None and growth is not None and growth > 0:
+                    peg = pe / (growth * 100)
+            except Exception:
+                pass
+
+        info["trailingPE"] = pe
+        info["forwardPE"] = forward_pe
+        info["pegRatio"] = peg
+        info["priceToBook"] = price_to_book
+
+        # RATIOS CALCULADOS DE RESPALDO (ROE, Margenes, Crecimiento)
         precio = limpiar_numero(info.get("currentPrice") or info.get("regularMarketPrice"))
         eps = limpiar_numero(info.get("trailingEps"))
         acciones = limpiar_numero(info.get("sharesOutstanding"))
@@ -251,14 +293,6 @@ def obtener_info(ticker):
         if eps is None and beneficio is not None and acciones and acciones > 0:
             eps = beneficio / acciones
             info["trailingEps"] = eps
-
-        if info.get("trailingPE") is None and precio is not None and eps is not None and eps > 0:
-            info["trailingPE"] = precio / eps
-
-        if info.get("priceToBook") is None and precio is not None and equity is not None and acciones and acciones > 0:
-            book_per_share = equity / acciones
-            if book_per_share > 0:
-                info["priceToBook"] = precio / book_per_share
 
         if info.get("profitMargins") is None and beneficio is not None and ingresos:
             info["profitMargins"] = beneficio / ingresos
@@ -300,51 +334,54 @@ def obtener_info(ticker):
         return info
 
 # =========================================================
-# OBJETIVOS DE ANALISTAS — MULTIFUENTE
+# OBJETIVOS DE ANALISTAS — MULTIFUENTE ROBUSTO
 # =========================================================
 
 @st.cache_data(ttl=3600)
 def obtener_objetivos_analistas(ticker):
-    resultado = {}
     try:
         empresa = yf.Ticker(ticker)
+        resultado = {}
 
-        # MÉTODO 1
-        try:
-            datos = empresa.get_analyst_price_targets()
-            if datos is not None:
-                if hasattr(datos, "to_dict"): datos = datos.to_dict()
-                if isinstance(datos, dict): resultado.update(datos)
-        except Exception:
-            pass
+        for metodo in [
+            "get_analyst_price_targets",
+            "analyst_price_targets"
+        ]:
+            try:
+                datos = getattr(empresa, metodo)
+                if callable(datos):
+                    datos = datos()
 
-        # MÉTODO 2
-        try:
-            datos = empresa.analyst_price_targets
-            if datos is not None:
-                if hasattr(datos, "to_dict"): datos = datos.to_dict()
                 if isinstance(datos, dict):
-                    for clave, valor in datos.items():
-                        if clave not in resultado or resultado.get(clave) is None:
-                            resultado[clave] = valor
-        except Exception:
-            pass
+                    for k, v in datos.items():
+                        v = limpiar_numero(v)
+                        if v is not None:
+                            resultado[k] = v
+
+                    if any(k in resultado for k in ["mean", "median", "low", "high"]):
+                        return resultado
+            except Exception:
+                pass
+
+        info = obtener_info(ticker)
+
+        mapa = {
+            "low": "targetLowPrice",
+            "mean": "targetMeanPrice",
+            "median": "targetMedianPrice",
+            "high": "targetHighPrice"
+        }
+
+        for destino, origen in mapa.items():
+            if destino not in resultado:
+                valor = limpiar_numero(info.get(origen))
+                if valor is not None:
+                    resultado[destino] = valor
+
+        return resultado
+
     except Exception:
-        pass
-
-    info = obtener_info(ticker)
-    for destino, origen in {
-        "low": "targetLowPrice",
-        "mean": "targetMeanPrice",
-        "median": "targetMedianPrice",
-        "high": "targetHighPrice"
-    }.items():
-        if resultado.get(destino) is None:
-            valor = limpiar_numero(info.get(origen))
-            if valor is not None:
-                resultado[destino] = valor
-
-    return resultado
+        return {}
 
 # =========================================================
 # HISTÓRICOS
@@ -374,24 +411,33 @@ def obtener_precios(ticker, periodo):
         return pd.DataFrame()
 
 # =========================================================
-# RECOMENDACIONES
+# RECOMENDACIONES Y CONSENSO — YFINANCE OFICIAL
 # =========================================================
 
 @st.cache_data(ttl=3600)
 def obtener_recomendaciones(ticker):
     try:
         empresa = yf.Ticker(ticker)
-        for metodo in ["recommendations_summary", "get_recommendations_summary"]:
+
+        for metodo in [
+            "get_recommendations_summary",
+            "recommendations_summary",
+            "get_recommendations",
+            "recommendations"
+        ]:
             try:
-                datos = getattr(empresa, metodo, None)
+                datos = getattr(empresa, metodo)
                 if callable(datos):
                     datos = datos()
+
                 if isinstance(datos, pd.DataFrame) and not datos.empty:
                     return datos
             except Exception:
                 pass
+
     except Exception:
         pass
+
     return pd.DataFrame()
 
 
@@ -399,17 +445,24 @@ def obtener_recomendaciones(ticker):
 def obtener_historial_recomendaciones(ticker):
     try:
         empresa = yf.Ticker(ticker)
-        for metodo in ["recommendations", "get_recommendations"]:
+
+        for metodo in [
+            "get_recommendations",
+            "recommendations"
+        ]:
             try:
-                datos = getattr(empresa, metodo, None)
+                datos = getattr(empresa, metodo)
                 if callable(datos):
                     datos = datos()
+
                 if isinstance(datos, pd.DataFrame) and not datos.empty:
                     return datos
             except Exception:
                 pass
+
     except Exception:
         pass
+
     return pd.DataFrame()
 
 
@@ -417,38 +470,52 @@ def obtener_historial_recomendaciones(ticker):
 def obtener_upgrades_downgrades(ticker):
     try:
         empresa = yf.Ticker(ticker)
-        for metodo in ["upgrades_downgrades", "get_upgrades_downgrades"]:
+
+        for metodo in [
+            "get_upgrades_downgrades",
+            "upgrades_downgrades"
+        ]:
             try:
-                datos = getattr(empresa, metodo, None)
+                datos = getattr(empresa, metodo)
                 if callable(datos):
                     datos = datos()
+
                 if isinstance(datos, pd.DataFrame) and not datos.empty:
                     return datos
             except Exception:
                 pass
+
     except Exception:
         pass
+
     return pd.DataFrame()
 
 # =========================================================
-# ESTIMACIONES — MULTIFUENTE
+# ESTIMACIONES DE ANALISTAS — YFINANCE OFICIAL
 # =========================================================
 
 @st.cache_data(ttl=3600)
 def obtener_estimaciones_eps(ticker):
     try:
         empresa = yf.Ticker(ticker)
-        for metodo in ["get_earnings_estimate", "earnings_estimate"]:
+
+        for metodo in [
+            "get_earnings_estimate",
+            "earnings_estimate"
+        ]:
             try:
-                datos = getattr(empresa, metodo, None)
+                datos = getattr(empresa, metodo)
                 if callable(datos):
                     datos = datos()
+
                 if isinstance(datos, pd.DataFrame) and not datos.empty:
                     return datos
             except Exception:
                 pass
+
     except Exception:
         pass
+
     return pd.DataFrame()
 
 
@@ -458,7 +525,7 @@ def obtener_estimaciones_ingresos(ticker):
         empresa = yf.Ticker(ticker)
         for metodo in ["get_revenue_estimate", "revenue_estimate"]:
             try:
-                datos = getattr(empresa, metodo, None)
+                datos = getattr(empresa, metodo)
                 if callable(datos):
                     datos = datos()
                 if isinstance(datos, pd.DataFrame) and not datos.empty:
@@ -476,7 +543,7 @@ def obtener_revisiones_eps(ticker):
         empresa = yf.Ticker(ticker)
         for metodo in ["get_eps_revisions", "eps_revisions"]:
             try:
-                datos = getattr(empresa, metodo, None)
+                datos = getattr(empresa, metodo)
                 if callable(datos):
                     datos = datos()
                 if isinstance(datos, pd.DataFrame) and not datos.empty:
@@ -494,7 +561,7 @@ def obtener_tendencia_eps(ticker):
         empresa = yf.Ticker(ticker)
         for metodo in ["get_eps_trend", "eps_trend"]:
             try:
-                datos = getattr(empresa, metodo, None)
+                datos = getattr(empresa, metodo)
                 if callable(datos):
                     datos = datos()
                 if isinstance(datos, pd.DataFrame) and not datos.empty:
@@ -512,7 +579,7 @@ def obtener_crecimiento_estimado(ticker):
         empresa = yf.Ticker(ticker)
         for metodo in ["get_growth_estimates", "growth_estimates"]:
             try:
-                datos = getattr(empresa, metodo, None)
+                datos = getattr(empresa, metodo)
                 if callable(datos):
                     datos = datos()
                 if isinstance(datos, pd.DataFrame) and not datos.empty:
