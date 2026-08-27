@@ -138,6 +138,11 @@ def obtener_info(ticker):
         except Exception:
             pass
 
+        # Variables de DataFrame inicializadas para cálculos posteriores
+        income = pd.DataFrame()
+        balance = pd.DataFrame()
+        cashflow = pd.DataFrame()
+
         # 3. CUENTA DE RESULTADOS
         try:
             income = empresa.get_income_stmt(freq="yearly")
@@ -235,41 +240,60 @@ def obtener_info(ticker):
             except Exception:
                 pass
 
-        # 7. CALCULOS SI FALTAN DATOS
-        precio = limpiar_numero(info.get("currentPrice"))
-        if precio is None:
-            precio = limpiar_numero(info.get("regularMarketPrice"))
-
+        # RATIOS CALCULADOS SI YAHOO NO LOS ENTREGA
+        precio = limpiar_numero(info.get("currentPrice") or info.get("regularMarketPrice"))
         eps = limpiar_numero(info.get("trailingEps"))
-        if eps is None and precio is not None and info.get("trailingPE") is not None:
-            pe = limpiar_numero(info.get("trailingPE"))
-            if pe is not None and pe != 0:
-                info["trailingEps"] = precio / pe
+        acciones = limpiar_numero(info.get("sharesOutstanding"))
+        equity = limpiar_numero(info.get("stockholdersEquity"))
+        ingresos = limpiar_numero(info.get("totalRevenue"))
+        beneficio = limpiar_numero(info.get("netIncomeToCommon"))
 
-        # 8. MARGENES Y RATIOS
-        if info.get("profitMargins") is None:
-            ingresos = limpiar_numero(info.get("totalRevenue"))
-            beneficio = limpiar_numero(info.get("netIncomeToCommon"))
-            if ingresos and beneficio is not None and ingresos != 0:
-                info["profitMargins"] = beneficio / ingresos
+        if eps is None and beneficio is not None and acciones and acciones > 0:
+            eps = beneficio / acciones
+            info["trailingEps"] = eps
+
+        if info.get("trailingPE") is None and precio is not None and eps is not None and eps > 0:
+            info["trailingPE"] = precio / eps
+
+        if info.get("priceToBook") is None and precio is not None and equity is not None and acciones and acciones > 0:
+            book_per_share = equity / acciones
+            if book_per_share > 0:
+                info["priceToBook"] = precio / book_per_share
+
+        if info.get("profitMargins") is None and beneficio is not None and ingresos:
+            info["profitMargins"] = beneficio / ingresos
+
+        if info.get("returnOnEquity") is None and beneficio is not None and equity:
+            info["returnOnEquity"] = beneficio / equity
 
         if info.get("operatingMargins") is None:
-            ingresos = limpiar_numero(info.get("totalRevenue"))
             operating = limpiar_numero(info.get("operatingIncome"))
             if ingresos and operating is not None and ingresos != 0:
                 info["operatingMargins"] = operating / ingresos
 
-        if info.get("returnOnEquity") is None:
-            beneficio = limpiar_numero(info.get("netIncomeToCommon"))
-            equity = limpiar_numero(info.get("stockholdersEquity"))
-            if beneficio is not None and equity is not None and equity != 0:
-                info["returnOnEquity"] = beneficio / equity
-
         if info.get("debtToEquity") is None:
             deuda = limpiar_numero(info.get("totalDebt"))
-            equity = limpiar_numero(info.get("stockholdersEquity"))
             if deuda is not None and equity is not None and equity != 0:
                 info["debtToEquity"] = (deuda / equity) * 100
+
+        if info.get("revenueGrowth") is None and isinstance(income, pd.DataFrame) and not income.empty:
+            try:
+                if "TotalRevenue" in income.index:
+                    serie = pd.to_numeric(income.loc["TotalRevenue"], errors="coerce").dropna()
+                    if len(serie) >= 2 and serie.iloc[1] != 0:
+                        info["revenueGrowth"] = (serie.iloc[0] / serie.iloc[1]) - 1
+            except Exception:
+                pass
+
+        if info.get("earningsGrowth") is None and isinstance(income, pd.DataFrame) and not income.empty:
+            try:
+                fila = "NetIncomeCommonStockholders" if "NetIncomeCommonStockholders" in income.index else "NetIncome"
+                if fila in income.index:
+                    serie = pd.to_numeric(income.loc[fila], errors="coerce").dropna()
+                    if len(serie) >= 2 and serie.iloc[1] != 0:
+                        info["earningsGrowth"] = (serie.iloc[0] / serie.iloc[1]) - 1
+            except Exception:
+                pass
 
         return info
     except Exception:
@@ -305,24 +329,20 @@ def obtener_objetivos_analistas(ticker):
                             resultado[clave] = valor
         except Exception:
             pass
-
-        # MÉTODO 3 — INFO
-        try:
-            info = obtener_info(ticker)
-            equivalencias = {
-                "low": "targetLowPrice",
-                "mean": "targetMeanPrice",
-                "median": "targetMedianPrice",
-                "high": "targetHighPrice"
-            }
-            for destino, origen in equivalencias.items():
-                if destino not in resultado or resultado.get(destino) is None:
-                    valor = limpiar_numero(info.get(origen))
-                    if valor is not None: resultado[destino] = valor
-        except Exception:
-            pass
     except Exception:
         pass
+
+    info = obtener_info(ticker)
+    for destino, origen in {
+        "low": "targetLowPrice",
+        "mean": "targetMeanPrice",
+        "median": "targetMedianPrice",
+        "high": "targetHighPrice"
+    }.items():
+        if resultado.get(destino) is None:
+            valor = limpiar_numero(info.get(origen))
+            if valor is not None:
+                resultado[destino] = valor
 
     return resultado
 
@@ -361,30 +381,54 @@ def obtener_precios(ticker, periodo):
 def obtener_recomendaciones(ticker):
     try:
         empresa = yf.Ticker(ticker)
-        datos = empresa.recommendations_summary
-        return datos if datos is not None else pd.DataFrame()
+        for metodo in ["recommendations_summary", "get_recommendations_summary"]:
+            try:
+                datos = getattr(empresa, metodo, None)
+                if callable(datos):
+                    datos = datos()
+                if isinstance(datos, pd.DataFrame) and not datos.empty:
+                    return datos
+            except Exception:
+                pass
     except Exception:
-        return pd.DataFrame()
+        pass
+    return pd.DataFrame()
 
 
 @st.cache_data(ttl=3600)
 def obtener_historial_recomendaciones(ticker):
     try:
         empresa = yf.Ticker(ticker)
-        datos = empresa.recommendations
-        return datos if datos is not None else pd.DataFrame()
+        for metodo in ["recommendations", "get_recommendations"]:
+            try:
+                datos = getattr(empresa, metodo, None)
+                if callable(datos):
+                    datos = datos()
+                if isinstance(datos, pd.DataFrame) and not datos.empty:
+                    return datos
+            except Exception:
+                pass
     except Exception:
-        return pd.DataFrame()
+        pass
+    return pd.DataFrame()
 
 
 @st.cache_data(ttl=3600)
 def obtener_upgrades_downgrades(ticker):
     try:
         empresa = yf.Ticker(ticker)
-        datos = empresa.upgrades_downgrades
-        return datos if datos is not None else pd.DataFrame()
+        for metodo in ["upgrades_downgrades", "get_upgrades_downgrades"]:
+            try:
+                datos = getattr(empresa, metodo, None)
+                if callable(datos):
+                    datos = datos()
+                if isinstance(datos, pd.DataFrame) and not datos.empty:
+                    return datos
+            except Exception:
+                pass
     except Exception:
-        return pd.DataFrame()
+        pass
+    return pd.DataFrame()
 
 # =========================================================
 # ESTIMACIONES — MULTIFUENTE
@@ -394,17 +438,15 @@ def obtener_upgrades_downgrades(ticker):
 def obtener_estimaciones_eps(ticker):
     try:
         empresa = yf.Ticker(ticker)
-        try:
-            datos = empresa.get_earnings_estimate()
-            if datos is not None and not datos.empty: return datos
-        except Exception:
-            pass
-
-        try:
-            datos = empresa.earnings_estimate
-            if datos is not None and not datos.empty: return datos
-        except Exception:
-            pass
+        for metodo in ["get_earnings_estimate", "earnings_estimate"]:
+            try:
+                datos = getattr(empresa, metodo, None)
+                if callable(datos):
+                    datos = datos()
+                if isinstance(datos, pd.DataFrame) and not datos.empty:
+                    return datos
+            except Exception:
+                pass
     except Exception:
         pass
     return pd.DataFrame()
@@ -414,17 +456,15 @@ def obtener_estimaciones_eps(ticker):
 def obtener_estimaciones_ingresos(ticker):
     try:
         empresa = yf.Ticker(ticker)
-        try:
-            datos = empresa.get_revenue_estimate()
-            if datos is not None and not datos.empty: return datos
-        except Exception:
-            pass
-
-        try:
-            datos = empresa.revenue_estimate
-            if datos is not None and not datos.empty: return datos
-        except Exception:
-            pass
+        for metodo in ["get_revenue_estimate", "revenue_estimate"]:
+            try:
+                datos = getattr(empresa, metodo, None)
+                if callable(datos):
+                    datos = datos()
+                if isinstance(datos, pd.DataFrame) and not datos.empty:
+                    return datos
+            except Exception:
+                pass
     except Exception:
         pass
     return pd.DataFrame()
@@ -434,17 +474,15 @@ def obtener_estimaciones_ingresos(ticker):
 def obtener_revisiones_eps(ticker):
     try:
         empresa = yf.Ticker(ticker)
-        try:
-            datos = empresa.get_eps_revisions()
-            if datos is not None and not datos.empty: return datos
-        except Exception:
-            pass
-
-        try:
-            datos = empresa.eps_revisions
-            if datos is not None and not datos.empty: return datos
-        except Exception:
-            pass
+        for metodo in ["get_eps_revisions", "eps_revisions"]:
+            try:
+                datos = getattr(empresa, metodo, None)
+                if callable(datos):
+                    datos = datos()
+                if isinstance(datos, pd.DataFrame) and not datos.empty:
+                    return datos
+            except Exception:
+                pass
     except Exception:
         pass
     return pd.DataFrame()
@@ -454,17 +492,15 @@ def obtener_revisiones_eps(ticker):
 def obtener_tendencia_eps(ticker):
     try:
         empresa = yf.Ticker(ticker)
-        try:
-            datos = empresa.get_eps_trend()
-            if datos is not None and not datos.empty: return datos
-        except Exception:
-            pass
-
-        try:
-            datos = empresa.eps_trend
-            if datos is not None and not datos.empty: return datos
-        except Exception:
-            pass
+        for metodo in ["get_eps_trend", "eps_trend"]:
+            try:
+                datos = getattr(empresa, metodo, None)
+                if callable(datos):
+                    datos = datos()
+                if isinstance(datos, pd.DataFrame) and not datos.empty:
+                    return datos
+            except Exception:
+                pass
     except Exception:
         pass
     return pd.DataFrame()
@@ -474,17 +510,15 @@ def obtener_tendencia_eps(ticker):
 def obtener_crecimiento_estimado(ticker):
     try:
         empresa = yf.Ticker(ticker)
-        try:
-            datos = empresa.get_growth_estimates()
-            if datos is not None and not datos.empty: return datos
-        except Exception:
-            pass
-
-        try:
-            datos = empresa.growth_estimates
-            if datos is not None and not datos.empty: return datos
-        except Exception:
-            pass
+        for metodo in ["get_growth_estimates", "growth_estimates"]:
+            try:
+                datos = getattr(empresa, metodo, None)
+                if callable(datos):
+                    datos = datos()
+                if isinstance(datos, pd.DataFrame) and not datos.empty:
+                    return datos
+            except Exception:
+                pass
     except Exception:
         pass
     return pd.DataFrame()
