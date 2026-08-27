@@ -114,6 +114,17 @@ def obtener_estimaciones_eps(ticker_symbol):
         pass
     return None
 
+@st.cache_data(ttl=1800)
+def obtener_noticias(ticker_symbol):
+    try:
+        ticker = yf.Ticker(ticker_symbol)
+        news = ticker.news
+        if news:
+            return news
+    except Exception:
+        pass
+    return []
+
 
 # =========================================================
 # MOTOR CENTRAL DE DIAGNÓSTICO MARKET AI
@@ -432,8 +443,34 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
 
 st.title("📈 MARKET AI - Terminal de Análisis Financiero")
 
+# --- BOTONES DE ACCESO RÁPIDO Y ÍNDICES ---
+st.markdown("### ⚡ Accesos Rápidos")
+b_col1, b_col2, b_col3, b_col4, b_col5 = st.columns(5)
+
+if "ticker_seleccionado" not in st.session_state:
+    st.session_state.ticker_seleccionado = "AAPL"
+
+with b_col1:
+    if st.button("🇺🇸 S&P 500 (^GSPC)"):
+        st.session_state.ticker_seleccionado = "^GSPC"
+with b_col2:
+    if st.button("🍏 Apple (AAPL)"):
+        st.session_state.ticker_seleccionado = "AAPL"
+with b_col3:
+    if st.button("💻 Microsoft (MSFT)"):
+        st.session_state.ticker_seleccionado = "MSFT"
+with b_col4:
+    if st.button("🚀 Nvidia (NVDA)"):
+        st.session_state.ticker_seleccionado = "NVDA"
+with b_col5:
+    if st.button("🔍 Google (GOOGL)"):
+        st.session_state.ticker_seleccionado = "GOOGL"
+
 st.sidebar.header("🔍 Búsqueda de Activo")
-ticker_input = st.sidebar.text_input("Símbolo Ticker (ej: AAPL, MSFT, NVDA, GOOGL):", value="AAPL").upper().strip()
+ticker_input = st.sidebar.text_input(
+    "Símbolo Ticker (ej: AAPL, MSFT, NVDA, ^GSPC):", 
+    value=st.session_state.ticker_seleccionado
+).upper().strip()
 
 if ticker_input:
     info = obtener_info_accion(ticker_input)
@@ -490,8 +527,12 @@ if ticker_input:
         if dcf is not None:
             try:
                 escenarios_dcf = dcf.calcular_escenarios_dcf(ticker_obj, info)
-                if escenarios_dcf and "base" in escenarios_dcf:
-                    valor_dcf_base = escenarios_dcf["base"].get("valor_por_accion")
+                if escenarios_dcf and isinstance(escenarios_dcf, dict) and "base" in escenarios_dcf:
+                    base_data = escenarios_dcf["base"]
+                    if isinstance(base_data, dict):
+                        valor_dcf_base = base_data.get("valor_por_accion")
+                    elif isinstance(base_data, (int, float)):
+                        valor_dcf_base = base_data
             except Exception:
                 pass
 
@@ -616,7 +657,7 @@ if ticker_input:
         g_c2.metric("Crecimiento Beneficios", f"{crecimiento_beneficios*100:+.2f}%" if crecimiento_beneficios else "N/D")
         g_c3.metric("Dividend Yield", f"{info.get('dividendYield')*100:.2f}%" if info.get('dividendYield') else "N/D")
 
-       # Sección DCF (Defensiva contra tipos de datos inesperados en datos_esc)
+        # Sección DCF (Defensiva contra tipos de datos inesperados en datos_esc)
         if escenarios_dcf and isinstance(escenarios_dcf, dict):
             st.header("🧮 Valoración DCF (Descuento de Flujos de Caja)")
             dcf_cols = st.columns(len(escenarios_dcf))
@@ -625,14 +666,12 @@ if ticker_input:
                 with dcf_cols[idx]:
                     st.subheader(f"Caso {str(nombre_esc).capitalize()}")
                     
-                    # Extraer el valor según el tipo de estructura devuelta
                     val_accion = None
                     if isinstance(datos_esc, dict):
                         val_accion = datos_esc.get('valor_por_accion')
                     elif isinstance(datos_esc, (int, float)):
                         val_accion = datos_esc
 
-                    # Renderizado seguro
                     if val_accion is not None and isinstance(val_accion, (int, float)) and not np.isnan(val_accion):
                         st.metric("Fair Value", f"${val_accion:,.2f}")
                         pot = ((val_accion - precio_analisis) / precio_analisis) * 100 if precio_analisis else None
@@ -641,7 +680,7 @@ if ticker_input:
                         st.metric("Fair Value", "N/D")
                         st.metric("Potencial", "N/D")
                 idx += 1
-       
+
         # Sección Analistas
         st.header("🎯 Analistas")
         a_c1, a_c2, a_c3, a_c4 = st.columns(4)
@@ -667,6 +706,23 @@ if ticker_input:
             st.dataframe(eps_df, use_container_width=True)
         else:
             st.write("No hay estimaciones de EPS disponibles.")
+
+        # --- SECCIÓN DE NOTICIAS DE LA EMPRESA ---
+        st.divider()
+        st.header("📰 Noticias Recientes")
+        noticias = obtener_noticias(ticker_input)
+        if noticias:
+            for item in noticias[:5]:
+                # Adaptación para leer la estructura de noticias de yfinance
+                titulo = item.get("title") or item.get("headline", "Sin título")
+                link = item.get("link") or item.get("url", "#")
+                publisher = item.get("publisher") or item.get("source", "Fuente desconocida")
+                
+                st.markdown(f"**[{titulo}]({link})**")
+                st.caption(f"Fuente: {publisher}")
+                st.write("---")
+        else:
+            st.write("No hay noticias recientes disponibles para este activo.")
 
     else:
         st.error("No se pudo cargar la información para el ticker introducido. Verifica el símbolo.")
