@@ -123,15 +123,10 @@ def obtener_estimaciones_eps(ticker_symbol):
 
 @st.cache_data(ttl=1800)
 def analizar_noticias(ticker_symbol):
-    """
-    Obtiene noticias reales de Yahoo Finance y realiza un análisis de
-    sentimiento, detección de catalizadores y riesgos.
-    """
     noticias_procesadas = []
     catalizadores_set = set()
     riesgos_set = set()
     
-    # Palabras clave para la detección de Catalizadores y Riesgos
     KW_CATALIZADORES = {
         'earnings': 'Publicación o superación de resultados empresariales',
         'profit': 'Mejora en las previsiones de beneficios',
@@ -179,15 +174,12 @@ def analizar_noticias(ticker_symbol):
         neg_count = 0
 
         for item in raw_news[:10]:
-            # Extracción segura de la estructura de yfinance
             content = item.get("content", {}) if isinstance(item.get("content"), dict) else {}
             
             titulo = item.get("title") or content.get("title") or "Sin título"
             fuente = item.get("publisher") or content.get("provider", {}).get("displayName") or "Fuente Financiera"
-            
             url = item.get("link") or content.get("canonicalUrl", {}).get("url") or "#"
             
-            # Fecha
             pub_date = item.get("providerPublishTime") or content.get("pubDate")
             if isinstance(pub_date, (int, float)):
                 fecha_str = datetime.fromtimestamp(pub_date).strftime("%d/%m/%Y %H:%M")
@@ -196,14 +188,12 @@ def analizar_noticias(ticker_symbol):
 
             resumen = item.get("summary") or content.get("summary") or titulo
 
-            # Cálculo de polaridad del título y resumen
             texto_completo = f"{titulo}. {resumen}"
             
             if TextBlob is not None:
                 blob = TextBlob(texto_completo)
-                polarity = blob.sentiment.polarity  # Valor entre -1.0 y 1.0
+                polarity = blob.sentiment.polarity
             else:
-                # Fallback de análisis por vocabulario básico si TextBlob no está disponible
                 polarity = 0.0
                 words = re.findall(r'\w+', texto_completo.lower())
                 pos_w = sum(1 for w in words if w in ['beat', 'growth', 'up', 'high', 'gain', 'buy', 'positive'])
@@ -213,7 +203,6 @@ def analizar_noticias(ticker_symbol):
 
             scores_polaridad.append(polarity)
 
-            # Clasificación del Sentimiento
             if polarity > 0.1:
                 sentimiento_str = "🟢 Positivo"
                 pos_count += 1
@@ -223,8 +212,6 @@ def analizar_noticias(ticker_symbol):
             else:
                 sentimiento_str = "🟡 Neutral"
 
-            # Clasificación de Importancia
-            longitud = len(texto_completo)
             abs_pol = abs(polarity)
             if abs_pol > 0.35 or "breaking" in titulo.lower():
                 importancia_str = "🔥 Alta"
@@ -233,7 +220,6 @@ def analizar_noticias(ticker_symbol):
             else:
                 importancia_str = "⚪ Baja"
 
-            # Detección de Catalizadores y Riesgos
             texto_lc = texto_completo.lower()
             for kw, desc in KW_CATALIZADORES.items():
                 if kw in texto_lc:
@@ -252,7 +238,6 @@ def analizar_noticias(ticker_symbol):
                 "importancia": importancia_str
             })
 
-        # Sentimiento General Normalizado (-100 a +100)
         if scores_polaridad:
             avg_pol = float(np.mean(scores_polaridad))
             puntuacion = int(avg_pol * 100)
@@ -294,14 +279,13 @@ def analizar_noticias(ticker_symbol):
 
 
 # =========================================================
-# MOTOR CENTRAL DE DIAGNÓSTICO MARKET AI
+# MOTOR CENTRAL DE DIAGNÓSTICO MARKET AI (SCORE GLOBAL)
 # =========================================================
 
 def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos_analistas):
     pts_tec, pts_val, pts_fund, pts_crec, pts_riesgo = 0.0, 0.0, 0.0, 0.0, 0.0
     pos, neg, riesgos, catalizadores = [], [], [], []
 
-    # 1. ANÁLISIS TÉCNICO (MÁX 25 PTS)
     precio = datos_tec.get("precio")
     ma20 = datos_tec.get("ma20")
     ma50 = datos_tec.get("ma50")
@@ -355,7 +339,6 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
 
     pts_tec = min(25.0, max(0.0, pts_tec))
 
-    # 2. VALORACIÓN (MÁX 25 PTS)
     fair_value = datos_val.get("valor_dcf_base")
     obj_med = datos_analistas.get("obj_med")
     pe = datos_val.get("pe")
@@ -429,7 +412,6 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
     else:
         est_val = "🟡 RAZONABLEMENTE VALORADA"
 
-    # 3. FUNDAMENTALES (MÁX 25 PTS)
     roe = datos_fund.get("roe")
     margen = datos_fund.get("margen")
     deuda = datos_fund.get("deuda")
@@ -485,7 +467,6 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
     else:
         calidad_fund = "Débiles"
 
-    # 4. CRECIMIENTO (MÁX 15 PTS)
     crec_ing = datos_crec.get("crecimiento_ingresos")
     crec_ben = datos_crec.get("crecimiento_beneficios")
     div_yield = datos_crec.get("dividend_yield")
@@ -530,7 +511,6 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
     else:
         nivel_crec = "Estancamiento"
 
-    # 5. RIESGO (MÁX 10 PTS)
     vol = datos_tec.get("volatilidad")
 
     if vol is not None and not np.isnan(vol):
@@ -557,7 +537,6 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
 
     pts_riesgo = min(10.0, max(0.0, pts_riesgo))
 
-    # SCORE FINAL
     score_total = min(100.0, max(0.0, pts_tec + pts_val + pts_fund + pts_crec + pts_riesgo))
 
     if score_total >= 85.0:
@@ -596,6 +575,177 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
             "potencial_dcf": potencial_dcf,
             "potencial_analistas": potencial_analistas
         }
+    }
+
+
+# =========================================================
+# MOTOR DE DIAGNÓSTICO Y PREDICCIÓN (HOLÍSTICO)
+# =========================================================
+
+def generar_diagnostico_market_ai(res_score, datos_tec, datos_val, datos_fund, datos_crec, datos_analistas, res_noticias):
+    """
+    Evalúa holísticamente el activo considerando todas las señales para deducir:
+    - Dirección Probable
+    - Nivel de Confianza (0-100%)
+    - Horizonte Temporal Estimado
+    - Señales a Favor / En Contra
+    - Explicación Sintética
+    - Veredicto de Inversión
+    """
+    signals_pos = []
+    signals_neg = []
+    
+    score = res_score["score_total"]
+    precio = datos_tec.get("precio")
+    rsi = datos_tec.get("rsi")
+    ma20 = datos_tec.get("ma20")
+    ma200 = datos_tec.get("ma200")
+    
+    fair_value = datos_val.get("valor_dcf_base")
+    obj_med = datos_analistas.get("obj_med")
+    pe = datos_val.get("pe")
+    
+    roe = datos_fund.get("roe")
+    deuda = datos_fund.get("deuda")
+    
+    crec_ing = datos_crec.get("crecimiento_ingresos")
+    sent_score = res_noticias.get("puntuacion_sentimiento", 0)
+    
+    # --- 1. RECOPILACIÓN Y CLASIFICACIÓN DE SEÑALES ---
+    
+    # DCF
+    pot_dcf = None
+    if fair_value and precio and precio > 0:
+        pot_dcf = ((fair_value - precio) / precio) * 100
+        if pot_dcf >= 15.0:
+            signals_pos.append(f"Valoración DCF con margen de seguridad (+{pot_dcf:.1f}% de potencial).")
+        elif pot_dcf <= -15.0:
+            signals_neg.append(f"Sobrevaloración respecto al modelo DCF ({pot_dcf:.1f}% de desviación).")
+
+    # Analistas
+    pot_analistas = None
+    if obj_med and precio and precio > 0:
+        pot_analistas = ((obj_med - precio) / precio) * 100
+        if pot_analistas >= 10.0:
+            signals_pos.append(f"Consenso de analistas favorable (Objetivo medio +{pot_analistas:.1f}%).")
+        elif pot_analistas <= -10.0:
+            signals_neg.append(f"Precio actual por encima del objetivo medio de analistas ({pot_analistas:.1f}%).")
+
+    # Técnico
+    if precio and ma200:
+        if precio > ma200:
+            signals_pos.append("Precio por encima de la media móvil estructural (MA200).")
+        else:
+            signals_neg.append("Cotización por debajo de la media móvil de 200 días.")
+            
+    if rsi is not None and not np.isnan(rsi):
+        if rsi < 35:
+            signals_pos.append(f"RSI en zona de sobreventa ({rsi:.1f}), propicio para rebotes.")
+        elif rsi > 70:
+            signals_neg.append(f"RSI en sobrecompra técnica ({rsi:.1f}), posible consolidación.")
+
+    # Fundamentales & Crecimiento
+    if roe and not np.isnan(roe) and roe > 0.15:
+        signals_pos.append(f"Alta rentabilidad sobre capital (ROE {roe*100:.1f}%).")
+    if pe and pe > 30:
+        signals_neg.append(f"Múltiplo de beneficios exigente (PER {pe:.1f}x).")
+    if crec_ing and not np.isnan(crec_ing) and crec_ing < 0:
+        signals_neg.append(f"Contracción reciente en los ingresos ({crec_ing*100:.1f}%).")
+
+    # Noticias / Sentimiento
+    if sent_score >= 25:
+        signals_pos.append(f"Sentimiento de noticias favorable (+{sent_score}/100).")
+    elif sent_score <= -25:
+        signals_neg.append(f"Sentimiento de noticias desfavorable ({sent_score}/100).")
+
+    # --- 2. CÁLCULO DE DIRECCIÓN PROBABLE ---
+    net_signals = len(signals_pos) - len(signals_neg)
+    
+    if score >= 68 and net_signals >= 1:
+        direccion = "🟢 PROBABLEMENTE ALCISTA"
+        veredicto = "🟢 COMPRA / SESGO ALCISTA"
+    elif score <= 42 or net_signals <= -2:
+        direccion = "🔴 PROBABLEMENTE BAJISTA"
+        veredicto = "🔴 VENTA / SESGO BAJISTA"
+    else:
+        direccion = "🟡 NEUTRAL / INCIERTA"
+        veredicto = "🟡 MANTENER / ESPERAR"
+
+    # --- 3. CÁLCULO DE CONFIANZA (0 - 100%) ---
+    # Factores de disponibilidad
+    data_points = 0
+    max_data_points = 6
+    if datos_tec.get("precio") is not None: data_points += 1
+    if fair_value is not None: data_points += 1
+    if obj_med is not None: data_points += 1
+    if roe is not None: data_points += 1
+    if crec_ing is not None: data_points += 1
+    if len(res_noticias.get("noticias", [])) > 0: data_points += 1
+    
+    base_completeness = (data_points / max_data_points) * 60.0  # Hasta 60% por datos disponibles
+    
+    # Coherencia de señales
+    total_sig = len(signals_pos) + len(signals_neg)
+    if total_sig > 0:
+        alignment = abs(len(signals_pos) - len(signals_neg)) / total_sig
+        coherence_score = alignment * 40.0  # Hasta 40% por alineación
+    else:
+        coherence_score = 20.0
+        
+    confianza = int(min(95, max(25, base_completeness + coherence_score)))
+
+    # --- 4. ESTIMACIÓN DE HORIZONTE TEMPORAL ---
+    # Ponderar según origen dominante de las señales impulsoras
+    short_term_weight = 0
+    medium_term_weight = 0
+    long_term_weight = 0
+
+    if rsi and (rsi > 70 or rsi < 35): short_term_weight += 2
+    if abs(sent_score) >= 30: short_term_weight += 2
+    if datos_tec.get("variacion") and abs(datos_tec.get("variacion")) > 3.0: short_term_weight += 1
+
+    if obj_med is not None: medium_term_weight += 2
+    if ma20 and precio and (precio > ma20): medium_term_weight += 1
+
+    if fair_value is not None: long_term_weight += 3
+    if roe and roe > 0.12: long_term_weight += 2
+
+    if short_term_weight >= max(medium_term_weight, long_term_weight):
+        horizonte = "⚡ MUY CORTO PLAZO (1-5 días)"
+    elif medium_term_weight >= long_term_weight:
+        horizonte = "📅 CORTO / MEDIO PLAZO (1-4 semanas)"
+    elif long_term_weight > 3:
+        horizonte = "📈 MEDIO / LARGO PLAZO (1-6 meses)"
+    else:
+        horizonte = "🗓️ LARGO PLAZO (6-24 meses)"
+
+    # --- 5. EXPLICACIÓN NARRATIVA SINTÉTICA ---
+    partes = []
+    partes.append(f"MARKET AI otorga un Score Global de {score:.1f}/100 a {datos_tec.get('ticker', 'el activo')}.")
+    
+    if pot_dcf is not None and pot_analistas is not None:
+        if pot_dcf > 0 and pot_analistas > 0:
+            partes.append(f"Tanto el modelo DCF (+{pot_dcf:.1f}%) como los analistas (+{pot_analistas:.1f}%) convergen en una infravaloración de la acción.")
+        elif pot_dcf < 0 and pot_analistas < 0:
+            partes.append("El modelo fundamental DCF y el consenso de mercado apuntan a una sobrevaloración frente a la cotización actual.")
+        else:
+            partes.append(f"Existe discrepancia entre el modelo DCF ({pot_dcf:+.1f}%) y las metas de los analistas ({pot_analistas:+.1f}%), sugiriendo visiones mixtas sobre su valor intrínseco.")
+            
+    if rsi:
+        partes.append(f"En el plano técnico, el activo se encuentra con un RSI en {rsi:.1f} y una estructura {res_score['diagnostico']['tendencia'].lower()}.")
+        
+    explicacion = " ".join(partes)
+
+    return {
+        "direccion": direccion,
+        "confianza": confianza,
+        "horizonte": horizonte,
+        "veredicto": veredicto,
+        "explicacion": explicacion,
+        "signals_pos": signals_pos if signals_pos else ["Sin factores fuertemente alcistas detectados."],
+        "signals_neg": signals_neg if signals_neg else ["Sin factores fuertemente bajistas detectados."],
+        "pot_dcf": pot_dcf,
+        "pot_analistas": pot_analistas
     }
 
 
@@ -735,7 +885,7 @@ if ticker_input:
 
         datos_tec_in = {
             "precio": precio_analisis, "ma20": ma20, "ma50": ma50, "ma200": ma200,
-            "rsi": rsi, "volatilidad": volatilidad, "variacion": variacion
+            "rsi": rsi, "volatilidad": volatilidad, "variacion": variacion, "ticker": ticker_input
         }
         datos_val_in = {
             "valor_dcf_base": valor_dcf_base, "pe": pe, "forward_pe": forward_pe,
@@ -754,63 +904,14 @@ if ticker_input:
             "obj_med": obj_med
         }
 
+        # Ejecución de Módulos
+        res_noticias = analizar_noticias(ticker_input)
         res_market_ai = calcular_market_ai_score(datos_tec_in, datos_val_in, datos_fund_in, datos_crec_in, datos_analistas_in)
+        diag_pred = generar_diagnostico_market_ai(res_market_ai, datos_tec_in, datos_val_in, datos_fund_in, datos_crec_in, datos_analistas_in, res_noticias)
+        
         diag = res_market_ai["diagnostico"]
 
-        st.divider()
-        st.header("🎯 MARKET AI SCORE")
-        
-        col_s1, col_s2 = st.columns([1, 2])
-        with col_s1:
-            st.metric("SCORE GLOBAL", f"{res_market_ai['score_total']:.1f} / 100")
-            st.markdown(f"### {res_market_ai['categoria']}")
-        
-        with col_s2:
-            st.write("**Desglose de la Puntuación:**")
-            st.write(
-                f"📈 **Técnico:** {res_market_ai['desglose']['tecnico']:.0f}/25 &nbsp;&nbsp;|&nbsp;&nbsp; "
-                f"💰 **Valoración:** {res_market_ai['desglose']['valoracion']:.0f}/25 &nbsp;&nbsp;|&nbsp;&nbsp; "
-                f"📊 **Fundamentales:** {res_market_ai['desglose']['fundamentales']:.0f}/25 &nbsp;&nbsp;|&nbsp;&nbsp; "
-                f"🚀 **Crecimiento:** {res_market_ai['desglose']['crecimiento']:.0f}/15 &nbsp;&nbsp;|&nbsp;&nbsp; "
-                f"⚠️ **Riesgo:** {res_market_ai['desglose']['riesgo']:.0f}/10"
-            )
-            st.progress(res_market_ai['score_total'] / 100)
-
-        st.subheader("🧠 DIAGNÓSTICO DE MARKET AI")
-        
-        m_col1, m_col2, m_col3, m_col4, m_col5 = st.columns(5)
-        m_col1.metric("Precio Actual", f"${diag['precio']:,.2f}" if diag['precio'] else "N/D")
-        m_col2.metric("Fair Value DCF", f"${diag['fair_value']:,.2f}" if diag['fair_value'] else "N/D")
-        m_col3.metric("Objetivo Analistas", f"${diag['target_analistas']:,.2f}" if diag['target_analistas'] else "N/D")
-        m_col4.metric("Potencial DCF", f"{diag['potencial_dcf']:+.1f}%" if diag['potencial_dcf'] is not None else "N/D")
-        m_col5.metric("Potencial Analistas", f"{diag['potencial_analistas']:+.1f}%" if diag['potencial_analistas'] is not None else "N/D")
-
-        st.info(f"**Tendencia:** {diag['tendencia']} &nbsp;|&nbsp; **Valoración:** {diag['estado_valoracion']} &nbsp;|&nbsp; **Fundamentales:** {diag['calidad_fundamentales']} &nbsp;|&nbsp; **Crecimiento:** {diag['nivel_crecimiento']}")
-
-        st.write(f"MARKET AI evalúa la compañía con una puntuación global de **{res_market_ai['score_total']:.1f}/100** ({res_market_ai['categoria']}), reflejando un perfil con **{diag['calidad_fundamentales'].lower()}** fundamentales y una orientación de **{diag['estado_valoracion'].lower()}**.")
-
-        diag_col1, diag_col2 = st.columns(2)
-        with diag_col1:
-            st.write("🟢 **PUNTOS POSITIVOS**")
-            for item in diag["positivos"]:
-                st.write(f"- {item}")
-                
-            st.write("🚀 **CATALIZADORES**")
-            for item in diag["catalizadores"]:
-                st.write(f"- {item}")
-
-        with diag_col2:
-            st.write("🔴 **PUNTOS NEGATIVOS**")
-            for item in diag["negativos"]:
-                st.write(f"- {item}")
-
-            st.write("⚠️ **RIESGOS**")
-            for item in diag["riesgos"]:
-                st.write(f"- {item}")
-
-        st.divider()
-
-        # Gráfico Histórico
+        # --- Gráfico Histórico ---
         st.header("📈 Gráfico de Cotización")
         if df_hist is not None and not df_hist.empty:
             fig = go.Figure()
@@ -833,7 +934,7 @@ if ticker_input:
         else:
             st.warning("No hay datos suficientes para renderear el gráfico.")
 
-        # Sección Fundamentales
+        # --- Sección Fundamentales ---
         st.header("📊 Fundamentales")
         f_c1, f_c2, f_c3, f_c4 = st.columns(4)
         f_c1.metric("PER (Trailing)", f"{pe:.2f}x" if pe else "N/D")
@@ -847,22 +948,21 @@ if ticker_input:
         f_c7.metric("Free Cash Flow", f"${flujo_caja:,.0f}" if flujo_caja else "N/D")
         f_c8.metric("EPS", f"${eps:.2f}" if eps else "N/D")
 
-        # Sección Crecimiento
+        # --- Sección Crecimiento ---
         st.header("🚀 Crecimiento")
         g_c1, g_c2, g_c3 = st.columns(3)
         g_c1.metric("Crecimiento Ingresos", f"{crecimiento_ingresos*100:+.2f}%" if crecimiento_ingresos else "N/D")
         g_c2.metric("Crecimiento Beneficios", f"{crecimiento_beneficios*100:+.2f}%" if crecimiento_beneficios else "N/D")
         g_c3.metric("Dividend Yield", f"{info.get('dividendYield')*100:.2f}%" if info.get('dividendYield') else "N/D")
 
-        # Sección DCF
+        # --- Sección DCF ---
         if escenarios_dcf and isinstance(escenarios_dcf, dict):
-            st.header("🧮 Valoración DCF (Descuento de Flujos de Caja)")
+            st.header("🎯 DCF / Valoración")
             dcf_cols = st.columns(len(escenarios_dcf))
             idx = 0
             for nombre_esc, datos_esc in escenarios_dcf.items():
                 with dcf_cols[idx]:
                     st.subheader(f"Caso {str(nombre_esc).capitalize()}")
-                    
                     val_accion = None
                     if isinstance(datos_esc, dict):
                         val_accion = datos_esc.get('valor_por_accion')
@@ -878,93 +978,138 @@ if ticker_input:
                         st.metric("Potencial", "N/D")
                 idx += 1
 
-        # Sección Analistas
-        st.header("🎯 Analistas")
+        # --- Sección Analistas ---
+        st.header("🧑‍💼 Analistas")
         a_c1, a_c2, a_c3, a_c4 = st.columns(4)
         a_c1.metric("Objetivo Mínimo", f"${objetivos.get('low'):,.2f}" if objetivos.get('low') else "N/D")
         a_c2.metric("Objetivo Medio", f"${objetivos.get('mean'):,.2f}" if objetivos.get('mean') else "N/D")
         a_c3.metric("Objetivo Máximo", f"${objetivos.get('high'):,.2f}" if objetivos.get('high') else "N/D")
         a_c4.metric("Mediana", f"${objetivos.get('median'):,.2f}" if objetivos.get('median') else "N/D")
 
-        st.subheader("🧑‍💼 Consenso de Analistas")
+        st.subheader("Consenso de Analistas")
         if "consensus" in objetivos:
             st.info(f"**Recomendación de Consenso:** {objetivos.get('consensus')} (Basado en {objetivos.get('num_analistas', 'N/D')} opiniones)")
 
-        st.subheader("🔄 Cambios Recientes de Analistas")
+        st.subheader("Cambios Recientes de Analistas")
         rec_df = obtener_recomendaciones_analistas(ticker_input)
         if rec_df is not None and not rec_df.empty:
             st.dataframe(rec_df.tail(10), use_container_width=True)
         else:
             st.write("No hay registros recientes de revisiones disponibles.")
 
-        st.subheader("🔮 Estimaciones de Analistas")
+        # --- Sección Estimaciones ---
+        st.header("🔮 Estimaciones")
         eps_df = obtener_estimaciones_eps(ticker_input)
         if eps_df is not None and not eps_df.empty:
             st.dataframe(eps_df, use_container_width=True)
         else:
             st.write("No hay estimaciones de EPS disponibles.")
 
-        # =========================================================
-        # NUEVA SECCIÓN: NOTICIAS Y SENTIMIENTO MARKET AI
-        # =========================================================
+        # --- Sección Noticias y Sentimiento ---
         st.divider()
-        st.header("📰 NOTICIAS Y SENTIMIENTO MARKET AI")
+        st.header("📰 Noticias y Sentimiento")
         
-        data_noticias = analizar_noticias(ticker_input)
-        
-        # 1. Metricas Principales de Sentimiento
         ns_col1, ns_col2 = st.columns(2)
         with ns_col1:
-            st.metric("Sentimiento General", data_noticias["sentimiento_general"])
+            st.metric("Sentimiento General", res_noticias["sentimiento_general"])
         with ns_col2:
-            st.metric("Puntuación de Sentimiento", f"{data_noticias['puntuacion_sentimiento']} / 100")
+            st.metric("Puntuación de Sentimiento", f"{res_noticias['puntuacion_sentimiento']} / 100")
             
-        st.write(f"*{data_noticias['resumen']}*")
-        st.write("")
+        st.write(f"*{res_noticias['resumen']}*")
 
-        # 2. Catalizadores y Riesgos Detectados en Noticias
-        cat_col, ries_col = st.columns(2)
-        with cat_col:
-            st.subheader("🚀 CATALIZADORES")
-            if data_noticias["catalizadores"]:
-                for cat in data_noticias["catalizadores"]:
-                    st.write(f"- {cat}")
-            else:
-                st.write("- No hay información reciente suficiente para determinar catalizadores específicos.")
-
-        with ries_col:
-            st.subheader("⚠️ RIESGOS DETECTADOS")
-            if data_noticias["riesgos"]:
-                for rsg in data_noticias["riesgos"]:
-                    st.write(f"- {rsg}")
-            else:
-                st.write("- No hay información reciente suficiente para determinar riesgos específicos.")
-
-        st.divider()
-
-        # 3. Listado de Noticias Recientes
-        st.subheader("📰 NOTICIAS RECIENTES")
-        
-        listado_noticias = data_noticias.get("noticias", [])
+        listado_noticias = res_noticias.get("noticias", [])
         if listado_noticias:
-            for item in listado_noticias:
+            for item in listado_noticias[:5]:
                 n_col1, n_col2 = st.columns([4, 1])
                 with n_col1:
                     if item['url'] != "#":
-                        st.markdown(f"### [{item['titulo']}]({item['url']})")
+                        st.markdown(f"**[{item['titulo']}]({item['url']})**")
                     else:
-                        st.markdown(f"### {item['titulo']}")
-                    
-                    st.caption(f"**Fuente:** {item['fuente']} | **Fecha:** {item['fecha']}")
-                    st.write(item['resumen'])
-                
+                        st.markdown(f"**{item['titulo']}**")
+                    st.caption(f"Fuente: {item['fuente']} | Fecha: {item['fecha']}")
                 with n_col2:
-                    st.write(f"**Sentimiento:** {item['sentimiento']}")
-                    st.write(f"**Importancia:** {item['importancia']}")
-                
+                    st.write(f"{item['sentimiento']} ({item['importancia']})")
                 st.write("---")
         else:
-            st.info("No hay información reciente suficiente.")
+            st.info("No hay noticias recientes suficientes.")
+
+        # --- Sección MARKET AI SCORE ---
+        st.divider()
+        st.header("🎯 MARKET AI SCORE")
+        
+        col_s1, col_s2 = st.columns([1, 2])
+        with col_s1:
+            st.metric("SCORE GLOBAL", f"{res_market_ai['score_total']:.1f} / 100")
+            st.markdown(f"### {res_market_ai['categoria']}")
+        
+        with col_s2:
+            st.write("**Desglose de la Puntuación:**")
+            st.write(
+                f"📈 **Técnico:** {res_market_ai['desglose']['tecnico']:.0f}/25 &nbsp;&nbsp;|&nbsp;&nbsp; "
+                f"💰 **Valoración:** {res_market_ai['desglose']['valoracion']:.0f}/25 &nbsp;&nbsp;|&nbsp;&nbsp; "
+                f"📊 **Fundamentales:** {res_market_ai['desglose']['fundamentales']:.0f}/25 &nbsp;&nbsp;|&nbsp;&nbsp; "
+                f"🚀 **Crecimiento:** {res_market_ai['desglose']['crecimiento']:.0f}/15 &nbsp;&nbsp;|&nbsp;&nbsp; "
+                f"⚠️ **Riesgo:** {res_market_ai['desglose']['riesgo']:.0f}/10"
+            )
+            st.progress(res_market_ai['score_total'] / 100)
+
+        # --- SECCIÓN FINAL: DIAGNÓSTICO FINAL DE MARKET AI ---
+        st.divider()
+        st.header("🧠 DIAGNÓSTICO FINAL DE MARKET AI")
+
+        p_col1, p_col2, p_col3 = st.columns(3)
+        p_col1.metric("Dirección Probable", diag_pred["direccion"])
+        p_col2.metric("Confianza del Diagnóstico", f"{diag_pred['confianza']}%")
+        p_col3.metric("Horizonte Temporal", diag_pred["horizonte"])
+
+        st.info(f"**Síntesis:** {diag_pred['explicacion']}")
+
+        # Valoración Comparativa
+        st.subheader("💵 Precio y Valoración Comparativa")
+        v_col1, v_col2, v_col3, v_col4, v_col5 = st.columns(5)
+        v_col1.metric("Precio Actual", f"${diag['precio']:,.2f}" if diag['precio'] else "N/D")
+        v_col2.metric("Fair Value DCF", f"${diag['fair_value']:,.2f}" if diag['fair_value'] else "N/D")
+        v_col3.metric("Potencial DCF", f"{diag['potencial_dcf']:+.1f}%" if diag['potencial_dcf'] is not None else "N/D")
+        v_col4.metric("Objetivo Analistas", f"${diag['target_analistas']:,.2f}" if diag['target_analistas'] else "N/D")
+        v_col5.metric("Potencial Analistas", f"{diag['potencial_analistas']:+.1f}%" if diag['potencial_analistas'] is not None else "N/D")
+
+        # Señales Conflictivas
+        st.subheader("⚖️ SEÑALES A FAVOR Y EN CONTRA")
+        sig_col1, sig_col2 = st.columns(2)
+        with sig_col1:
+            st.write("🟢 **A FAVOR**")
+            for item in diag_pred["signals_pos"]:
+                st.write(f"- {item}")
+        with sig_col2:
+            st.write("🔴 **EN CONTRA**")
+            for item in diag_pred["signals_neg"]:
+                st.write(f"- {item}")
+
+        # Catalizadores y Riesgos
+        cr_col1, cr_col2 = st.columns(2)
+        with cr_col1:
+            st.subheader("🚀 PRÓXIMOS CATALIZADORES")
+            cat_list = set(diag["catalizadores"] + res_noticias["catalizadores"])
+            if cat_list:
+                for c_item in cat_list:
+                    st.write(f"- {c_item}")
+            else:
+                st.write("- No hay acontecimientos disparadores detectados.")
+
+        with cr_col2:
+            st.subheader("⚠️ PRINCIPALES RIESGOS")
+            r_list = set(diag["riesgos"] + res_noticias["riesgos"])
+            if r_list:
+                for r_item in r_list:
+                    st.write(f"- {r_item}")
+            else:
+                st.write("- Sin factores de riesgo crítico detectados.")
+
+        # Veredicto Final
+        st.subheader("🎯 VEREDICTO MARKET AI")
+        st.markdown(f"## {diag_pred['veredicto']}")
+        
+        st.caption("⚠️ **Aviso de Responsabilidad:** Este diagnóstico es una estimación algorítmica basada en los datos disponibles y no garantiza el comportamiento futuro del mercado.")
 
     else:
         st.error("No se pudo cargar la información para el ticker introducido. Verifica el símbolo.")
