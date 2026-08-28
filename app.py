@@ -39,13 +39,82 @@ st.caption("Encuentra las oportunidades más interesantes detectadas por MARKET 
 if st.button("🔎 BUSCAR MEJORES OPORTUNIDADES"):
     progress_bar = st.progress(0)
     status_text = st.empty()
+
+    def escaneo_metales_motor():
+    """Motor de análisis rápido para metales y materias primas."""
+    metales = {
+        "GC=F": "Oro",
+        "SI=F": "Plata",
+        "HG=F": "Cobre",
+        "PL=F": "Platino",
+        "PA=F": "Paladio"
+    }
+    
+    resultados = []
+    for ticker_symbol, nombre in metales.items():
+        try:
+            t = yf.Ticker(ticker_symbol)
+            hist = t.history(period="1y")
+            if hist.empty:
+                continue
+            
+            precio = float(hist['Close'].iloc[-1])
+            var_pct = float(((precio - hist['Close'].iloc[-2]) / hist['Close'].iloc[-2]) * 100)
+            
+            # Cálculo de RSI sencillo
+            delta = hist['Close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+            rs = gain / loss
+            rsi = float((100 - (100 / (1 + rs))).iloc[-1])
+            
+            score = 50.0
+            if rsi < 35: score += 25
+            elif rsi > 70: score -= 15
+            if var_pct > 0: score += 15
+            
+            direccion = "🟢 Alcista" if score >= 60 else ("🔴 Bajista" if score <= 40 else "🟡 Neutral")
+            
+            resultados.append({
+                'activo': f"{nombre} ({ticker_symbol})",
+                'tipo': '🥇 Metal/Futuro',
+                'score': round(score, 1),
+                'precio': round(precio, 2),
+                'potencial': round(var_pct, 2),
+                'confianza': 75,
+                'riesgo': 'Bajo' if rsi < 60 else 'Alto',
+                'direccion': direccion,
+                'horizonte': '1-4 semanas',
+                'oportunidad_global': score * 0.7 + 75 * 0.3
+            })
+        except Exception:
+            continue
+            
+    return resultados
     
     status_text.text("🔄 Analizando mercado (Acciones y Metales)...")
     progress_bar.progress(30)
     
-    # IMPORTANTE: Sustituye 'escaneo_sp500_motor' y 'escaneo_metales_motor' 
-    # por los nombres de tus funciones de escaneo existentes en esta hoja.
-    universo = ejecutar_escaneo_master_ranking(escaneo_sp500_motor, escaneo_metales_motor)
+# En lugar de escaneo_sp500_motor():
+        if mercado_sel in ["TODOS LOS MERCADOS", "📈 S&P 500 / ACCIONES"]:
+            universo = obtener_universo_sp500()
+            candidatas = ejecutar_filtro_rapido(universo)
+            
+            for ticker in candidatas:
+                res = ejecutar_analisis_completo_ticker(ticker)
+                if res:
+                    resultados_globales.append({
+                        'activo': res['ticker'],
+                        'tipo': '📈 Acción',
+                        'score': res['score'],
+                        'precio': res['precio'],
+                        'potencial': res['potencial_dcf'] if res['potencial_dcf'] is not None else 0.0,
+                        'confianza': res['confianza'],
+                        'riesgo': 'Medio',
+                        'direccion': res['direccion'],
+                        'horizonte': res['horizonte'],
+                        'oportunidad_global': res['score'] * 0.7 + res['confianza'] * 0.3
+                    })
     
     progress_bar.progress(100)
     status_text.empty()
