@@ -7,6 +7,13 @@ import plotly.express as px
 from datetime import datetime, timedelta
 import requests
 import os
+import re
+
+# Análisis de sentimiento con TextBlob
+try:
+    from textblob import TextBlob
+except ImportError:
+    TextBlob = None
 
 # Importar el módulo DCF existente (INTACTO)
 try:
@@ -27,7 +34,6 @@ FINNHUB_API_KEY = os.environ.get("FINNHUB_API_KEY", "")
 
 @st.cache_data(ttl=3600)
 def obtener_info_accion(ticker_symbol):
-    """Devuelve únicamente el diccionario info (serializable para @st.cache_data)"""
     try:
         ticker = yf.Ticker(ticker_symbol)
         info = ticker.info
@@ -38,18 +44,15 @@ def obtener_info_accion(ticker_symbol):
 
 @st.cache_data(ttl=1800)
 def obtener_historico(ticker_symbol, periodo="1y"):
-    """Descarga datos históricos usando el símbolo del ticker"""
     try:
         ticker = yf.Ticker(ticker_symbol)
         df = ticker.history(period=periodo)
         if df.empty:
             return None
-        # Cálculo de indicadores técnicos
         df['MA20'] = df['Close'].rolling(window=20).mean()
         df['MA50'] = df['Close'].rolling(window=50).mean()
         df['MA200'] = df['Close'].rolling(window=200).mean()
         
-        # RSI 14
         delta = df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -114,16 +117,180 @@ def obtener_estimaciones_eps(ticker_symbol):
         pass
     return None
 
+# =========================================================
+# MOTOR DE NOTICIAS Y SENTIMIENTO MARKET AI (INDEPENDIENTE)
+# =========================================================
+
 @st.cache_data(ttl=1800)
-def obtener_noticias(ticker_symbol):
+def analizar_noticias(ticker_symbol):
+    """
+    Obtiene noticias reales de Yahoo Finance y realiza un análisis de
+    sentimiento, detección de catalizadores y riesgos.
+    """
+    noticias_procesadas = []
+    catalizadores_set = set()
+    riesgos_set = set()
+    
+    # Palabras clave para la detección de Catalizadores y Riesgos
+    KW_CATALIZADORES = {
+        'earnings': 'Publicación o superación de resultados empresariales',
+        'profit': 'Mejora en las previsiones de beneficios',
+        'revenue': 'Incremento destacado en ventas/ingresos',
+        'launch': 'Lanzamiento de nuevos productos/servicios',
+        'contract': 'Firma de contratos relevantes',
+        'acquisition': 'Estrategia de adquisición / M&A',
+        'buyback': 'Anuncio o programa de recompra de acciones',
+        'dividend': 'Incremento o pago de dividendos',
+        'partnership': 'Alianzas estratégicas o expansiones',
+        'approval': 'Aprobación regulatoria o patente concedida',
+        'upgrade': 'Mejora de recomendación por firmas de inversión'
+    }
+    
+    KW_RIESGOS = {
+        'downgrade': 'Rebaja de recomendación o precio objetivo',
+        'loss': 'Pérdidas operativas o caída en márgenes',
+        'lawsuit': 'Litigios, demandas o investigaciones legales',
+        'investigation': 'Escrutinio o investigación regulatoria',
+        'debt': 'Preocupaciones vinculadas a la deuda',
+        'layoff': 'Anuncio de reestructuraciones o despidos',
+        'decline': 'Contracción de la demanda o cuota de mercado',
+        'delay': 'Retrasos en producción o cadena de suministro',
+        'cut': 'Recorte de previsiones financieras (Guidance)',
+        'sanction': 'Tensiones geopolíticas o sanciones'
+    }
+
     try:
         ticker = yf.Ticker(ticker_symbol)
-        news = ticker.news
-        if news:
-            return news
+        raw_news = ticker.news
+        if not raw_news:
+            return {
+                "noticias": [],
+                "sentimiento_general": "🟡 NEUTRAL",
+                "puntuacion_sentimiento": 0,
+                "noticias_positivas": 0,
+                "noticias_negativas": 0,
+                "catalizadores": [],
+                "riesgos": [],
+                "resumen": "No hay información reciente suficiente."
+            }
+        
+        scores_polaridad = []
+        pos_count = 0
+        neg_count = 0
+
+        for item in raw_news[:10]:
+            # Extracción segura de la estructura de yfinance
+            content = item.get("content", {}) if isinstance(item.get("content"), dict) else {}
+            
+            titulo = item.get("title") or content.get("title") or "Sin título"
+            fuente = item.get("publisher") or content.get("provider", {}).get("displayName") or "Fuente Financiera"
+            
+            url = item.get("link") or content.get("canonicalUrl", {}).get("url") or "#"
+            
+            # Fecha
+            pub_date = item.get("providerPublishTime") or content.get("pubDate")
+            if isinstance(pub_date, (int, float)):
+                fecha_str = datetime.fromtimestamp(pub_date).strftime("%d/%m/%Y %H:%M")
+            else:
+                fecha_str = "Reciente"
+
+            resumen = item.get("summary") or content.get("summary") or titulo
+
+            # Cálculo de polaridad del título y resumen
+            texto_completo = f"{titulo}. {resumen}"
+            
+            if TextBlob is not None:
+                blob = TextBlob(texto_completo)
+                polarity = blob.sentiment.polarity  # Valor entre -1.0 y 1.0
+            else:
+                # Fallback de análisis por vocabulario básico si TextBlob no está disponible
+                polarity = 0.0
+                words = re.findall(r'\w+', texto_completo.lower())
+                pos_w = sum(1 for w in words if w in ['beat', 'growth', 'up', 'high', 'gain', 'buy', 'positive'])
+                neg_w = sum(1 for w in words if w in ['miss', 'fall', 'down', 'low', 'drop', 'sell', 'negative'])
+                if pos_w + neg_w > 0:
+                    polarity = (pos_w - neg_w) / (pos_w + neg_w)
+
+            scores_polaridad.append(polarity)
+
+            # Clasificación del Sentimiento
+            if polarity > 0.1:
+                sentimiento_str = "🟢 Positivo"
+                pos_count += 1
+            elif polarity < -0.1:
+                sentimiento_str = "🔴 Negativo"
+                neg_count += 1
+            else:
+                sentimiento_str = "🟡 Neutral"
+
+            # Clasificación de Importancia
+            longitud = len(texto_completo)
+            abs_pol = abs(polarity)
+            if abs_pol > 0.35 or "breaking" in titulo.lower():
+                importancia_str = "🔥 Alta"
+            elif abs_pol > 0.15:
+                importancia_str = "🟠 Media"
+            else:
+                importancia_str = "⚪ Baja"
+
+            # Detección de Catalizadores y Riesgos
+            texto_lc = texto_completo.lower()
+            for kw, desc in KW_CATALIZADORES.items():
+                if kw in texto_lc:
+                    catalizadores_set.add(desc)
+            for kw, desc in KW_RIESGOS.items():
+                if kw in texto_lc:
+                    riesgos_set.add(desc)
+
+            noticias_procesadas.append({
+                "titulo": titulo,
+                "fuente": fuente,
+                "fecha": fecha_str,
+                "url": url,
+                "resumen": resumen,
+                "sentimiento": sentimiento_str,
+                "importancia": importancia_str
+            })
+
+        # Sentimiento General Normalizado (-100 a +100)
+        if scores_polaridad:
+            avg_pol = float(np.mean(scores_polaridad))
+            puntuacion = int(avg_pol * 100)
+            puntuacion = max(-100, min(100, puntuacion))
+        else:
+            puntuacion = 0
+
+        if puntuacion >= 25:
+            sent_gen = "🟢 POSITIVO"
+        elif puntuacion <= -25:
+            sent_gen = "🔴 NEGATIVO"
+        else:
+            sent_gen = "🟡 NEUTRAL"
+
+        resumen_gen = f"Se han analizado {len(noticias_procesadas)} noticias recientes de fuentes financieras. El volumen presenta {pos_count} noticias de sesgo favorable, {neg_count} desfavorables y {len(noticias_procesadas) - pos_count - neg_count} de corte neutral."
+
+        return {
+            "noticias": noticias_procesadas,
+            "sentimiento_general": sent_gen,
+            "puntuacion_sentimiento": puntuacion,
+            "noticias_positivas": pos_count,
+            "noticias_negativas": neg_count,
+            "catalizadores": list(catalizadores_set),
+            "riesgos": list(riesgos_set),
+            "resumen": resumen_gen
+        }
+
     except Exception:
-        pass
-    return []
+        return {
+            "noticias": [],
+            "sentimiento_general": "🟡 NEUTRAL",
+            "puntuacion_sentimiento": 0,
+            "noticias_positivas": 0,
+            "noticias_negativas": 0,
+            "catalizadores": [],
+            "riesgos": [],
+            "resumen": "⚠️ No se ha podido obtener información de noticias en este momento."
+        }
 
 
 # =========================================================
@@ -131,11 +298,6 @@ def obtener_noticias(ticker_symbol):
 # =========================================================
 
 def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos_analistas):
-    """
-    Motor central de diagnóstico e interpretación.
-    Distribución de puntos (Máximo 100):
-      - Técnico: <= 25 | Valoración: <= 25 | Fundamentales: <= 25 | Crecimiento: <= 15 | Riesgo: <= 10
-    """
     pts_tec, pts_val, pts_fund, pts_crec, pts_riesgo = 0.0, 0.0, 0.0, 0.0, 0.0
     pos, neg, riesgos, catalizadores = [], [], [], []
 
@@ -443,7 +605,6 @@ def calcular_market_ai_score(datos_tec, datos_val, datos_fund, datos_crec, datos
 
 st.title("📈 MARKET AI - Terminal de Análisis Financiero")
 
-# --- BOTONES DE ACCESO RÁPIDO Y ÍNDICES ---
 st.markdown("### ⚡ Accesos Rápidos")
 b_col1, b_col2, b_col3, b_col4, b_col5 = st.columns(5)
 
@@ -522,26 +683,21 @@ if ticker_input:
         objetivos = obtener_objetivos_analistas(ticker_input)
         obj_med = objetivos.get("mean")
 
-        # =========================================================
-        # INTEGRACIÓN RESTRUCTURADA CON DCF.PY
-        # =========================================================
+        # Integración con dcf.py
         escenarios_dcf = None
         valor_dcf_base = None
 
         if dcf is not None:
             try:
-                # 1. Extracción de variables financieras desde Yahoo Finance
                 free_cash_flow = info.get("freeCashflow")
                 deuda_dcf = info.get("totalDebt") or 0.0
                 
-                # Obtención preferente de caja
                 caja_dcf = info.get("totalCash")
                 if caja_dcf is None:
                     caja_dcf = info.get("cashAndCashEquivalents") or 0.0
                 
                 acciones_dcf = info.get("sharesOutstanding")
 
-                # 2. Validación de premisas críticas antes de invocar dcf.py
                 faltantes = []
                 if free_cash_flow is None or free_cash_flow <= 0:
                     faltantes.append("Free Cash Flow (FCF) no disponible o <= 0")
@@ -549,7 +705,6 @@ if ticker_input:
                     faltantes.append("Acciones en circulación (sharesOutstanding) no disponibles o <= 0")
 
                 if not faltantes:
-                    # 3. Llamada correcta a la firma de dcf.py
                     escenarios_dcf = dcf.calcular_escenarios_dcf(
                         free_cash_flow=float(free_cash_flow),
                         deuda=float(deuda_dcf),
@@ -557,18 +712,14 @@ if ticker_input:
                         acciones=float(acciones_dcf)
                     )
 
-                    # 4. Extracción del Fair Value Base de forma segura y estricta
                     if escenarios_dcf and isinstance(escenarios_dcf, dict) and "base" in escenarios_dcf:
                         esc_base = escenarios_dcf["base"]
-                        
-                        # Manejo según si el escenario retorna un dict o una cifra directa
                         candidato_base = None
                         if isinstance(esc_base, dict):
                             candidato_base = esc_base.get("valor_por_accion")
                         elif isinstance(esc_base, (int, float)):
                             candidato_base = esc_base
 
-                        # Verificación: numérico, finito y mayor que 0
                         if (candidato_base is not None 
                                 and isinstance(candidato_base, (int, float)) 
                                 and np.isfinite(candidato_base) 
@@ -703,7 +854,7 @@ if ticker_input:
         g_c2.metric("Crecimiento Beneficios", f"{crecimiento_beneficios*100:+.2f}%" if crecimiento_beneficios else "N/D")
         g_c3.metric("Dividend Yield", f"{info.get('dividendYield')*100:.2f}%" if info.get('dividendYield') else "N/D")
 
-        # Sección DCF (Defensiva contra tipos de datos inesperados en datos_esc)
+        # Sección DCF
         if escenarios_dcf and isinstance(escenarios_dcf, dict):
             st.header("🧮 Valoración DCF (Descuento de Flujos de Caja)")
             dcf_cols = st.columns(len(escenarios_dcf))
@@ -718,7 +869,7 @@ if ticker_input:
                     elif isinstance(datos_esc, (int, float)):
                         val_accion = datos_esc
 
-                    if val_accion is not None and isinstance(val_accion, (int, float)) and not np.isnan(val_accion):
+                    if val_accion is not None and isinstance(val_accion, (int, float)) and np.isfinite(val_accion) and val_accion > 0:
                         st.metric("Fair Value", f"${val_accion:,.2f}")
                         pot = ((val_accion - precio_analisis) / precio_analisis) * 100 if precio_analisis else None
                         st.metric("Potencial", f"{pot:+.1f}%" if pot is not None else "N/D")
@@ -753,22 +904,67 @@ if ticker_input:
         else:
             st.write("No hay estimaciones de EPS disponibles.")
 
-        # --- SECCIÓN DE NOTICIAS DE LA EMPRESA ---
+        # =========================================================
+        # NUEVA SECCIÓN: NOTICIAS Y SENTIMIENTO MARKET AI
+        # =========================================================
         st.divider()
-        st.header("📰 Noticias Recientes")
-        noticias = obtener_noticias(ticker_input)
-        if noticias:
-            for item in noticias[:5]:
-                # Adaptación para leer la estructura de noticias de yfinance
-                titulo = item.get("title") or item.get("headline", "Sin título")
-                link = item.get("link") or item.get("url", "#")
-                publisher = item.get("publisher") or item.get("source", "Fuente desconocida")
+        st.header("📰 NOTICIAS Y SENTIMIENTO MARKET AI")
+        
+        data_noticias = analizar_noticias(ticker_input)
+        
+        # 1. Metricas Principales de Sentimiento
+        ns_col1, ns_col2 = st.columns(2)
+        with ns_col1:
+            st.metric("Sentimiento General", data_noticias["sentimiento_general"])
+        with ns_col2:
+            st.metric("Puntuación de Sentimiento", f"{data_noticias['puntuacion_sentimiento']} / 100")
+            
+        st.write(f"*{data_noticias['resumen']}*")
+        st.write("")
+
+        # 2. Catalizadores y Riesgos Detectados en Noticias
+        cat_col, ries_col = st.columns(2)
+        with cat_col:
+            st.subheader("🚀 CATALIZADORES")
+            if data_noticias["catalizadores"]:
+                for cat in data_noticias["catalizadores"]:
+                    st.write(f"- {cat}")
+            else:
+                st.write("- No hay información reciente suficiente para determinar catalizadores específicos.")
+
+        with ries_col:
+            st.subheader("⚠️ RIESGOS DETECTADOS")
+            if data_noticias["riesgos"]:
+                for rsg in data_noticias["riesgos"]:
+                    st.write(f"- {rsg}")
+            else:
+                st.write("- No hay información reciente suficiente para determinar riesgos específicos.")
+
+        st.divider()
+
+        # 3. Listado de Noticias Recientes
+        st.subheader("📰 NOTICIAS RECIENTES")
+        
+        listado_noticias = data_noticias.get("noticias", [])
+        if listado_noticias:
+            for item in listado_noticias:
+                n_col1, n_col2 = st.columns([4, 1])
+                with n_col1:
+                    if item['url'] != "#":
+                        st.markdown(f"### [{item['titulo']}]({item['url']})")
+                    else:
+                        st.markdown(f"### {item['titulo']}")
+                    
+                    st.caption(f"**Fuente:** {item['fuente']} | **Fecha:** {item['fecha']}")
+                    st.write(item['resumen'])
                 
-                st.markdown(f"**[{titulo}]({link})**")
-                st.caption(f"Fuente: {publisher}")
+                with n_col2:
+                    st.write(f"**Sentimiento:** {item['sentimiento']}")
+                    st.write(f"**Importancia:** {item['importancia']}")
+                
                 st.write("---")
         else:
-            st.write("No hay noticias recientes disponibles para este activo.")
+            st.info("No hay información reciente suficiente.")
 
     else:
         st.error("No se pudo cargar la información para el ticker introducido. Verifica el símbolo.")
