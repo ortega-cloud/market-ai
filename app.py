@@ -9,6 +9,7 @@ import requests
 import os
 import re
 import time
+from master_ranking import ejecutar_escaneo_master_ranking, generar_explicacion
 
 # Análisis de sentimiento con TextBlob
 try:
@@ -22,7 +23,104 @@ try:
 except ImportError:
     dcf = None
 
-st.set_page_config(page_title="MARKET AI - Análisis y Escáner de Acciones", layout="wide", page_icon="📈")
+st.set_page_config(
+    page_title="Market AI - Master Ranking",
+    page_icon="🌎",
+    layout="wide"
+)
+
+# ------------------------------------------------------------------
+# 🌎 MARKET AI MASTER RANKING (SECCIÓN PRINCIPAL)
+# ------------------------------------------------------------------
+st.title("🌎 MARKET AI MASTER RANKING")
+st.caption("Encuentra las oportunidades más interesantes detectadas por MARKET AI en el mercado.")
+
+if st.button("🔎 BUSCAR MEJORES OPORTUNIDADES"):
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    status_text.text("🔄 Analizando mercado (Acciones y Metales)...")
+    progress_bar.progress(30)
+    
+    # IMPORTANTE: Sustituye 'escaneo_sp500_motor' y 'escaneo_metales_motor' 
+    # por los nombres de tus funciones de escaneo existentes en esta hoja.
+    universo = ejecutar_escaneo_master_ranking(escaneo_sp500_motor, escaneo_metales_motor)
+    
+    progress_bar.progress(100)
+    status_text.empty()
+    progress_bar.empty()
+    
+    st.success("✅ Análisis completado.")
+    
+    num_acciones = sum(1 for x in universo if x.get('tipo') == '📈 Acción')
+    num_metales = sum(1 for x in universo if x.get('tipo') == '🥇 Metal/Futuro')
+    
+    st.write(f"**Acciones analizadas:** {num_acciones} | **Metales analizados:** {num_metales} | **Oportunidades válidas:** {len(universo)}")
+    st.caption(f"Última actualización: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    if universo:
+        # 1. MEJOR OPORTUNIDAD ACTUAL
+        top1 = universo[0]
+        st.markdown("---")
+        st.subheader("🥇 MEJOR OPORTUNIDAD DETECTADA AHORA")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Activo", f"{top1['activo']} ({top1['tipo']})")
+        col2.metric("Score", f"{top1['score']}/100")
+        col3.metric("Dirección", top1['direccion'])
+        col4.metric("Precio", f"${top1['precio']:.2f}")
+        
+        col5, col6, col7 = st.columns(3)
+        col5.metric("Potencial", f"{top1['potencial']:+.2f}%")
+        col6.metric("Confianza", f"{top1['confianza']}%")
+        col7.metric("Horizonte", top1.get('horizonte', '📅 Medio plazo'))
+        
+        st.write("**¿Por qué?**")
+        st.info(generar_explicacion(top1))
+        
+        # 2. CATEGORÍAS DESTACADAS
+        st.markdown("---")
+        st.subheader("📌 Mejor Oportunidad por Categoría")
+        
+        alcistas = [x for x in universo if "Alcista" in x.get('direccion', '')]
+        bajistas = [x for x in universo if "Bajista" in x.get('direccion', '')]
+        metales = [x for x in universo if x.get('tipo') == "🥇 Metal/Futuro"]
+        
+        c1, c2, c3 = st.columns(3)
+        if alcistas:
+            c1.success(f"📈 **Mejor Acción Alcista:** {alcistas[0]['activo']} ({alcistas[0]['oportunidad_global']:.1f} Pts)")
+        if bajistas:
+            c2.error(f"🔻 **Mejor Acción Bajista:** {bajistas[0]['activo']} ({bajistas[0]['oportunidad_global']:.1f} Pts)")
+        if metales:
+            c3.warning(f"🥇 **Mejor Metal:** {metales[0]['activo']} ({metales[0]['oportunidad_global']:.1f} Pts)")
+            
+        # 3. TOP 10 GLOBAL
+        st.markdown("---")
+        st.subheader("🏆 TOP 10 MARKET AI")
+        
+        top10 = universo[:10]
+        df_top10 = pd.DataFrame(top10)[[
+            'activo', 'tipo', 'score', 'precio', 'potencial', 
+            'confianza', 'riesgo', 'direccion', 'horizonte', 'oportunidad_global'
+        ]]
+        df_top10.columns = ['Activo', 'Tipo', 'Score', 'Precio', 'Potencial (%)', 'Confianza (%)', 'Riesgo', 'Dirección', 'Horizonte', 'Oportunidad Global']
+        st.dataframe(df_top10, use_container_width=True)
+        
+        # 4. TOP 5 ALCISTAS Y BAJISTAS
+        col_alc, col_baj = st.columns(2)
+        with col_alc:
+            st.subheader("🟢 TOP 5 OPORTUNIDADES ALCISTAS")
+            df_alc = pd.DataFrame(alcistas[:5])[['activo', 'tipo', 'score', 'potencial', 'confianza', 'riesgo']] if alcistas else pd.DataFrame()
+            st.dataframe(df_alc, use_container_width=True)
+            
+        with col_baj:
+            st.subheader("🔴 TOP 5 OPORTUNIDADES BAJISTAS")
+            st.caption("Nota: Muestra señales de caída, sobrevaloración, debilidad técnica o deterioro fundamental.")
+            df_baj = pd.DataFrame(bajistas[:5])[['activo', 'tipo', 'score', 'potencial', 'confianza', 'riesgo']] if bajistas else pd.DataFrame()
+            st.dataframe(df_baj, use_container_width=True)
+
+# Divisor para separar el Ranking Global del resto de tus herramientas existentes
+st.markdown("---")
 
 # =========================================================
 # CONFIGURACIÓN Y API KEYS
