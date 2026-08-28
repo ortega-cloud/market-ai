@@ -522,19 +522,65 @@ if ticker_input:
         objetivos = obtener_objetivos_analistas(ticker_input)
         obj_med = objetivos.get("mean")
 
+        # =========================================================
+        # INTEGRACIÓN RESTRUCTURADA CON DCF.PY
+        # =========================================================
         escenarios_dcf = None
         valor_dcf_base = None
+
         if dcf is not None:
             try:
-                escenarios_dcf = dcf.calcular_escenarios_dcf(ticker_obj, info)
-                if escenarios_dcf and isinstance(escenarios_dcf, dict) and "base" in escenarios_dcf:
-                    base_data = escenarios_dcf["base"]
-                    if isinstance(base_data, dict):
-                        valor_dcf_base = base_data.get("valor_por_accion")
-                    elif isinstance(base_data, (int, float)):
-                        valor_dcf_base = base_data
-            except Exception:
-                pass
+                # 1. Extracción de variables financieras desde Yahoo Finance
+                free_cash_flow = info.get("freeCashflow")
+                deuda_dcf = info.get("totalDebt") or 0.0
+                
+                # Obtención preferente de caja
+                caja_dcf = info.get("totalCash")
+                if caja_dcf is None:
+                    caja_dcf = info.get("cashAndCashEquivalents") or 0.0
+                
+                acciones_dcf = info.get("sharesOutstanding")
+
+                # 2. Validación de premisas críticas antes de invocar dcf.py
+                faltantes = []
+                if free_cash_flow is None or free_cash_flow <= 0:
+                    faltantes.append("Free Cash Flow (FCF) no disponible o <= 0")
+                if acciones_dcf is None or acciones_dcf <= 0:
+                    faltantes.append("Acciones en circulación (sharesOutstanding) no disponibles o <= 0")
+
+                if not faltantes:
+                    # 3. Llamada correcta a la firma de dcf.py
+                    escenarios_dcf = dcf.calcular_escenarios_dcf(
+                        free_cash_flow=float(free_cash_flow),
+                        deuda=float(deuda_dcf),
+                        caja=float(caja_dcf),
+                        acciones=float(acciones_dcf)
+                    )
+
+                    # 4. Extracción del Fair Value Base de forma segura y estricta
+                    if escenarios_dcf and isinstance(escenarios_dcf, dict) and "base" in escenarios_dcf:
+                        esc_base = escenarios_dcf["base"]
+                        
+                        # Manejo según si el escenario retorna un dict o una cifra directa
+                        candidato_base = None
+                        if isinstance(esc_base, dict):
+                            candidato_base = esc_base.get("valor_por_accion")
+                        elif isinstance(esc_base, (int, float)):
+                            candidato_base = esc_base
+
+                        # Verificación: numérico, finito y mayor que 0
+                        if (candidato_base is not None 
+                                and isinstance(candidato_base, (int, float)) 
+                                and np.isfinite(candidato_base) 
+                                and candidato_base > 0):
+                            valor_dcf_base = float(candidato_base)
+                else:
+                    st.warning(f"⚠️ **DCF no disponible para {ticker_input}:** " + " | ".join(faltantes))
+
+            except Exception as e:
+                st.error(f"⚠️ **Error en el cálculo del DCF:** {str(e)}")
+                escenarios_dcf = None
+                valor_dcf_base = None
 
         datos_tec_in = {
             "precio": precio_analisis, "ma20": ma20, "ma50": ma50, "ma200": ma200,
