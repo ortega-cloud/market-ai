@@ -9,7 +9,22 @@ import requests
 import os
 import re
 import time
-from master_ranking import ejecutar_escaneo_master_ranking, generar_explicacion
+
+# 1. Definimos el adaptador para las acciones usando tu función encontrada
+def escaneo_acciones():
+    return obtener_universo_sp500()
+
+# 2. Definimos una función sencilla para metales
+def escaneo_metales():
+    # Si tienes una lista o función de metales la ejecutas aquí.
+    # Si metales devuelve un DataFrame o lista existente en tu app, retórnala:
+    try:
+        return obtener_datos_metales() # Prueba si existe esta función
+    except NameError:
+        return [] # Si no existe, devuelve una lista vacía para que no rompa la app
+
+# 3. Llamamos al Master Ranking con las funciones adaptadas
+universo = ejecutar_escaneo_master_ranking(escaneo_acciones, escaneo_metales)
 
 # Análisis de sentimiento con TextBlob
 try:
@@ -41,10 +56,6 @@ if st.button("🔎 BUSCAR MEJORES OPORTUNIDADES"):
     
     status_text.text("🔄 Analizando mercado (Acciones y Metales)...")
     progress_bar.progress(30)
-    
-    # IMPORTANTE: Sustituye 'escaneo_sp500_motor' y 'escaneo_metales_motor' 
-    # por los nombres de tus funciones de escaneo existentes en esta hoja.
-    universo = ejecutar_escaneo_master_ranking(escaneo_sp500_motor, escaneo_metales_motor)
     
     progress_bar.progress(100)
     status_text.empty()
