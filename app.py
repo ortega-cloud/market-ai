@@ -67,6 +67,45 @@ def obtener_universo_sp500():
         pass
     return RESPALDO_SP500
 
+# LLAMADA AL MOTOR PREDICTIVO
+pred_res = ejecutar_prediction_engine(datos_tec, datos_val, datos_fund, datos_crec, datos_analistas, res_noticias, es_metal=es_metal)
+
+# SECCIÓN VISUAL EN STREAMLIT
+st.divider()
+st.header("🔮 PREDICCIÓN MARKET AI")
+
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Dirección Probable", pred_res["direccion"])
+c2.metric("Confianza de Predicción", f"{pred_res['confianza']}%")
+c3.metric("Datos Utilizados", f"{pred_res['datos_utilizados_pct']}%")
+c4.metric("Score Predictivo", f"{pred_res['score_predictivo']:+.1f}")
+
+st.subheader("📊 Probabilidades por Escenario")
+pc1, pc2, pc3 = st.columns(3)
+pc1.metric("🟢 Alcista", f"{pred_res['probabilidades']['alcista']}%")
+pc2.metric("🟡 Base", f"{pred_res['probabilidades']['base']}%")
+pc3.metric("🔴 Bajista", f"{pred_res['probabilidades']['bajista']}%")
+
+st.subheader("⏱️ Horizontes Temporales")
+h_cols = st.columns(4)
+for i, (h_nombre, h_dir) in enumerate(pred_res["horizontes"].items()):
+    with h_cols[i]:
+        st.caption(h_nombre)
+        st.write(f"**{h_dir}**")
+
+st.subheader("🧠 ¿Por qué MARKET AI piensa esto?")
+st.info(pred_res["razon_dominante"])
+
+col_pos, col_neg = st.columns(2)
+with col_pos:
+    st.write("🟢 **Señales Alcistas:**")
+    for s in pred_res["senales_pos"]:
+        st.write(f"- [{s['cat']}] {s['desc']}")
+with col_neg:
+    st.write("🔴 **Señales Bajistas:**")
+    for s in pred_res["senales_neg"]:
+        st.write(f"- [{s['cat']}] {s['desc']}")
+
 # =========================================================
 # MOTORES ESPECIALIZADOS
 # =========================================================
