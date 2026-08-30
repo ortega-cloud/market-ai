@@ -998,16 +998,24 @@ def ejecutar_analisis_completo_ticker(ticker_symbol):
     }
     
 # ==========================================
-# PARTE C: PREDICCIÓN MARKET AI
+# PARTE C: PREDICCIÓN MARKET AI (AUTOCORREGIDA)
 # ==========================================
-# 1. Calculamos la predicción usando los datos del ticker activo
+# Mapeo inteligente de variables para evitar NameError
+d_tec = globals().get('datos_tec_in', globals().get('datos_tec', {}))
+d_val = globals().get('datos_val_in', globals().get('datos_val', {}))
+d_fund = globals().get('datos_fund_in', globals().get('datos_fund', {}))
+d_crec = globals().get('datos_crec_in', globals().get('datos_crec', {}))
+d_analistas = globals().get('datos_analistas_in', globals().get('datos_analistas', {}))
+d_noticias = globals().get('res_noticias', {})
+
+# 1. Calculamos la predicción
 pred_res = ejecutar_prediction_engine(
-    datos_tec_in, 
-    datos_val_in, 
-    datos_fund_in, 
-    datos_crec_in, 
-    datos_analistas_in, 
-    res_noticias
+    d_tec, 
+    d_val, 
+    d_fund, 
+    d_crec, 
+    d_analistas, 
+    d_noticias
 )
 
 # 2. Mostramos los datos en pantalla
@@ -1026,7 +1034,7 @@ pc1.metric("🟢 Alcista", f"{pred_res['probabilidades']['alcista']}%")
 pc2.metric("🟡 Base", f"{pred_res['probabilidades']['base']}%")
 pc3.metric("🔴 Bajista", f"{pred_res['probabilidades']['bajista']}%")
 
-if pred_res["objetivos"]:
+if pred_res.get("objetivos"):
     st.subheader("🎯 Objetivos de Precio")
     po1, po2, po3, po4 = st.columns(4)
     po1.metric("Precio Actual", f"${pred_res['objetivos']['actual']}")
@@ -1036,7 +1044,7 @@ if pred_res["objetivos"]:
 
 st.subheader("⏱️ Horizontes Temporales")
 h_cols = st.columns(4)
-for i, (h_nombre, h_dir) in enumerate(pred_res["horizontes"].items()):
+for i, (h_nombre, h_dir) in enumerate(pred_res.get("horizontes", {}).items()):
     with h_cols[i]:
         st.caption(h_nombre)
         st.write(f"**{h_dir}**")
