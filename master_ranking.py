@@ -102,3 +102,16 @@ def ejecutar_escaneo_master_ranking(_escanner_sp500_fn, _escanner_metales_fn):
     # Ordenar por Oportunidad Global descendente
     universo.sort(key=lambda x: x["oportunidad_global"], reverse=True)
     return universo
+
+    # Llamada al prediction engine dentro del escáner
+    pred_res = ejecutar_prediction_engine(datos_tec, datos_val, datos_fund, datos_crec, datos_analistas, res_noticias, es_metal)
+
+    # Añadir a las columnas de la tabla final del ranking:
+    registro_item = {
+    'activo': ticker,
+    'score': score_global,
+    'Predicción': pred_res['direccion'],
+    'Confianza': f"{pred_res['confianza']}%",
+    'Horizonte': pred_res['horizonte_principal'],
+    # ... conserva exactamente el resto de tus campos originales ...
+}
