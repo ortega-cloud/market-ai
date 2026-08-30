@@ -978,15 +978,26 @@ def ejecutar_analisis_completo_ticker(ticker_symbol):
         "oportunidad_global": res_score["score_total"] * 0.7 + diag_pred["confianza"] * 0.3
     }
     
-pred_res = ejecutar_prediction_engine(datos_tec, datos_val, datos_fund, datos_crec, datos_analistas, res_noticias, es_metal=es_metal)
+# ==========================================
+# PARTE C: PREDICCIÓN MARKET AI
+# ==========================================
+# 1. Calculamos la predicción usando los datos del ticker activo
+pred_res = ejecutar_prediction_engine(
+    datos_tec_in, 
+    datos_val_in, 
+    datos_fund_in, 
+    datos_crec_in, 
+    datos_analistas_in, 
+    res_noticias
+)
 
-# SECCIÓN VISUAL EN STREAMLIT
+# 2. Mostramos los datos en pantalla
 st.divider()
 st.header("🔮 PREDICCIÓN MARKET AI")
 
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Dirección Probable", pred_res["direccion"])
-c2.metric("Confianza de Predicción", f"{pred_res['confianza']}%")
+c2.metric("Confianza", f"{pred_res['confianza']}%")
 c3.metric("Datos Utilizados", f"{pred_res['datos_utilizados_pct']}%")
 c4.metric("Score Predictivo", f"{pred_res['score_predictivo']:+.1f}")
 
@@ -996,6 +1007,14 @@ pc1.metric("🟢 Alcista", f"{pred_res['probabilidades']['alcista']}%")
 pc2.metric("🟡 Base", f"{pred_res['probabilidades']['base']}%")
 pc3.metric("🔴 Bajista", f"{pred_res['probabilidades']['bajista']}%")
 
+if pred_res["objetivos"]:
+    st.subheader("🎯 Objetivos de Precio")
+    po1, po2, po3, po4 = st.columns(4)
+    po1.metric("Precio Actual", f"${pred_res['objetivos']['actual']}")
+    po2.metric("Objetivo Alcista", f"${pred_res['objetivos']['alcista']}")
+    po3.metric("Escenario Base", f"${pred_res['objetivos']['base']}")
+    po4.metric("Objetivo Bajista", f"${pred_res['objetivos']['bajista']}")
+
 st.subheader("⏱️ Horizontes Temporales")
 h_cols = st.columns(4)
 for i, (h_nombre, h_dir) in enumerate(pred_res["horizontes"].items()):
@@ -1003,18 +1022,25 @@ for i, (h_nombre, h_dir) in enumerate(pred_res["horizontes"].items()):
         st.caption(h_nombre)
         st.write(f"**{h_dir}**")
 
-st.subheader("🧠 ¿Por qué MARKET AI piensa esto?")
-st.info(pred_res["razon_dominante"])
+st.subheader("🧠 Razonamiento del Modelo")
+st.info(f"**{pred_res['escenario_dominante']}:** {pred_res['razon_dominante']}")
 
 col_pos, col_neg = st.columns(2)
 with col_pos:
-    st.write("🟢 **Señales Alcistas:**")
-    for s in pred_res["senales_pos"]:
-        st.write(f"- [{s['cat']}] {s['desc']}")
+    st.markdown("### 🟢 Señales Alcistas")
+    if pred_res["senales_pos"]:
+        for s in pred_res["senales_pos"]:
+            st.write(f"• **[{s['cat']}]** {s['desc']}")
+    else:
+        st.caption("No hay señales alcistas destacadas.")
+
 with col_neg:
-    st.write("🔴 **Señales Bajistas:**")
-    for s in pred_res["senales_neg"]:
-        st.write(f"- [{s['cat']}] {s['desc']}")
+    st.markdown("### 🔴 Señales Bajistas")
+    if pred_res["senales_neg"]:
+        for s in pred_res["senales_neg"]:
+            st.write(f"• **[{s['cat']}]** {s['desc']}")
+    else:
+        st.caption("No hay señales bajistas destacadas.")
 
 # =========================================================
 # 🌎 MARKET AI MASTER RANKING (SECCIÓN PRINCIPAL)
