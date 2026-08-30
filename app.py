@@ -9,6 +9,25 @@ import requests
 import os
 import re
 import time
+# Importar la función del prediction engine desde tu archivo externo
+try:
+    from prediction_engine import ejecutar_prediction_engine
+except ImportError:
+    # Función de respaldo si el archivo prediction_engine.py no está presente
+    def ejecutar_prediction_engine(*args, **kwargs):
+        return {
+            "direccion": "🟡 NEUTRAL",
+            "confianza": 50,
+            "datos_utilizados_pct": 100,
+            "score_predictivo": 0.0,
+            "probabilidades": {"alcista": 33, "base": 34, "bajista": 33},
+            "objetivos": None,
+            "horizontes": {"Corto Plazo": "Neutral", "Medio Plazo": "Neutral"},
+            "escenario_dominante": "Base",
+            "razon_dominante": "Sin datos predictivos suficientes.",
+            "senales_pos": [],
+            "senales_neg": []
+        }
 
 # Análisis de sentimiento con TextBlob
 try:
