@@ -1818,3 +1818,81 @@ if st.button("🔎 EJECUTAR BACKTEST", use_container_width=True):
                     df_bt[["fecha", "ticker", "score", "direccion", "confianza", "precio_inicial", "precio_final", "rentabilidad", "resultado"]],
                     use_container_width=True
                 )
+
+# ==========================================
+# SECCIÓN: MARKET AI MODEL OPTIMIZER
+# ==========================================
+from model_optimizer import optimizar_pesos_historicos
+
+st.divider()
+st.header("🧠 OPTIMIZACIÓN Y CALIBRACIÓN DEL MODELO MARKET AI")
+st.caption("Evalúa señales históricas y valida configuraciones sin Overfitting ni Look-Ahead Bias.")
+
+col_opt1, col_opt2, col_opt3 = st.columns(3)
+
+with col_opt1:
+    tipo_activo_opt = st.radio("Mercado", ["📈 Acciones", "🥇 Metales/Futuros"], key="rad_opt_market")
+    
+with col_opt2:
+    if tipo_activo_opt == "📈 Acciones":
+        ticker_opt = st.text_input("Ticker Optimización", value="AAPL", key="txt_opt_ticker").upper()
+        es_metal_opt = False
+    else:
+        ticker_opt = st.selectbox("Metal / Futuro", ["GC=F", "SI=F", "HG=F", "CL=F"], key="sb_opt_metal")
+        es_metal_opt = True
+
+with col_opt3:
+    periodo_opt = st.selectbox("Ventana de Datos", [12, 24, 36], index=1, format_func=lambda x: f"{x} Meses", key="sb_opt_period")
+
+if st.button("🚀 EJECUTAR OPTIMIZACIÓN DE MODELO", use_container_width=True, key="btn_run_optimizer"):
+    with st.spinner("Analizando independencia de señales y validando subconjuntos TRAIN / VALIDATION..."):
+        res_opt, err_opt = optimizar_pesos_historicos(
+            ticker=ticker_opt,
+            periodo_meses=periodo_opt,
+            horizonte_dias=20,
+            es_metal=es_metal_opt
+        )
+        
+        if res_opt is None:
+            st.warning(f"⚠️ {err_opt}")
+        else:
+            mod_act = res_opt["modelo_actual"]
+            mod_opt = res_opt["modelo_optimizado"]
+            
+            # 1. Comparativa Modelo Actual vs Optimizado
+            st.subheader("⚖️ Configuración Actualmente Activa vs Recomendada")
+            
+            col_m1, col_m2 = st.columns(2)
+            
+            with col_m1:
+                st.info("📌 **CONFIGURACIÓN ACTUALMENTE ACTIVA**")
+                p_act = mod_act["pesos"]
+                st.write(f"- **Técnico:** {p_act[0]}% | **Valoración:** {p_act[1]}%")
+                st.write(f"- **Fundamentales:** {p_act[2]}% | **Crecimiento:** {p_act[3]}%")
+                st.write(f"- **Noticias/Sentimiento:** {p_act[4]}% | **Riesgo:** {p_act[5]}%")
+                st.markdown(f"**Tasa Acierto (TRAIN / VAL):** {mod_act['acierto_train']}% / **{mod_act['acierto_val']}%**")
+                st.markdown(f"**Rent. Media (VAL):** {mod_act['rent_val']:+.2f}%")
+                
+            with col_m2:
+                st.success("🔬 **MARKET AI RECOMIENDA ESTA CONFIGURACIÓN**")
+                p_opt = mod_opt["pesos"]
+                st.write(f"- **Técnico:** {p_opt[0]}% | **Valoración:** {p_opt[1]}%")
+                st.write(f"- **Fundamentales:** {p_opt[2]}% | **Crecimiento:** {p_opt[3]}%")
+                st.write(f"- **Noticias/Sentimiento:** {p_opt[4]}% | **Riesgo:** {p_opt[5]}%")
+                st.markdown(f"**Tasa Acierto (TRAIN / VAL):** {mod_opt['acierto_train']}% / **{mod_opt['acierto_val']}%**")
+                st.markdown(f"**Rent. Media (VAL):** {mod_opt['rent_val']:+.2f}%")
+                
+            st.warning("⚠️ **Nota de Control de Overfitting:** La recomendación no modifica automáticamente los pesos del sistema en producción. Requiere validación por el usuario.")
+
+            # 2. División de Datos
+            st.markdown(f"📊 **Subconjuntos Evaluados:** TRAIN ({res_opt['num_train']} muestras) | VALIDATION ({res_opt['num_val']} muestras)")
+
+            # 3. Comparación Visual TRAIN vs VALIDATION
+            st.subheader("📈 Comparativa de Precisión por Perfil de Pesos")
+            df_perf_plot = pd.DataFrame(res_opt["perfiles_evaluados"])
+            st.bar_chart(df_perf_plot.set_index("nombre")[["acierto_train", "acierto_val"]])
+
+            # 4. Ranking de Señales Individuales
+            st.subheader("🎯 Ranking de Fiabilidad de Señales Individuales")
+            df_senales_disp = res_opt["tabla_senales"].drop(columns=["_pct_val"], errors="ignore")
+            st.dataframe(df_senales_disp, use_container_width=True)
