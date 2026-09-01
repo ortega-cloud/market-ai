@@ -61,83 +61,68 @@ if st.button("🔎 EJECUTAR BACKTEST", use_container_width=True):
     with st.spinner("Evaluando rendimiento histórico sin Look-Ahead Bias..."):
         res_bt = ejecutar_backtest_engine(ticker_bt, horizonte_dias, periodo_meses, es_metal=es_metal_bt)
         
-        if res_bt is None or res_bt[0].empty:
-            st.warning("N/D - Datos históricos insuficientes para el periodo y horizonte seleccionados.")
+       if st.button("🔎 EJECUTAR BACKTEST", use_container_width=True):
+    with st.spinner("Evaluando rendimiento histórico sin Look-Ahead Bias..."):
+        res_bt = ejecutar_backtest_engine(
+            ticker=ticker_bt,
+            periodo_meses=periodo_meses,
+            horizonte_dias=horizonte_dias,
+            es_metal=es_metal_bt
+        )
+        
+        # Unpack seguro según lo que devuelva la función
+        df_bt = None
+        ret_buy_hold = 0.0
+        err_msg = "No se pudieron obtener datos."
+        
+        if isinstance(res_bt, tuple):
+            if isinstance(res_bt[0], tuple):
+                # Si vino empaquetado como ((df, ret), full_dict)
+                df_bt, ret_buy_hold = res_bt[0]
+            elif isinstance(res_bt[0], pd.DataFrame):
+                # Si vino empaquetado como (df, ret)
+                df_bt, ret_buy_hold = res_bt[0], res_bt[1]
+            else:
+                df_bt, err_msg = res_bt[0], str(res_bt[1])
+        elif isinstance(res_bt, dict):
+            # Si devolvió un diccionario directo
+            df_bt = res_bt.get("resultados")
+            ret_buy_hold = res_bt.get("buy_hold", 0.0)
+
+        # Validación sin romper por AttributeError
+        if df_bt is None or not isinstance(df_bt, pd.DataFrame) or df_bt.empty:
+            st.warning(f"⚠️ {err_msg if isinstance(err_msg, str) else 'N/D - Datos insuficientes'}")
         else:
-            df_bt, ret_buy_hold = res_bt
-            
-            # 2. Métricas Globales
+            # 1. Métricas Principales
             tot_pred = len(df_bt)
             aciertos = len(df_bt[df_bt["resultado"] == "✅ Acierto"])
-            tasa_acierto = (aciertos / tot_pred) * 100 if tot_pred > 0 else 0
-            ret_media = df_bt["rentabilidad"].mean()
-            mejor_res = df_bt["rentabilidad"].max()
-            peor_res = df_bt["rentabilidad"].min()
-            
-            # Rentabilidad acumulada Market AI Strategy
-            ret_acum_mai = df_bt["rentabilidad"].sum()
+            tasa_acierto = (aciertos / tot_pred) * 100.0 if tot_pred > 0 else 0.0
+            ret_media = float(df_bt["rentabilidad"].mean())
+            mejor_res = float(df_bt["rentabilidad"].max())
+            peor_res = float(df_bt["rentabilidad"].min())
+            ret_acum = float(df_bt["rentabilidad"].sum())
 
             st.subheader("🎯 Resumen de Rendimiento")
             m1, m2, m3, m4, m5 = st.columns(5)
-            m1.metric("Predicciones Evaluadas", tot_pred)
-            m2.metric("Tasa de Acierto", f"{tasa_acierto:.1f}%")
-            m3.metric("Rentabilidad Media", f"{ret_media:+.2f}%")
-            m4.metric("Mejor Resultado", f"{mejor_res:+.2f}%")
-            m5.metric("Peor Resultado", f"{peor_res:+.2f}%")
+            m1.metric("📊 Predicciones", tot_pred)
+            m2.metric("🎯 Tasa de Acierto", f"{tasa_acierto:.1f}%")
+            m3.metric("📈 Rentabilidad Media", f"{ret_media:+.2f}%")
+            m4.metric("🚀 Mejor Operación", f"{mejor_res:+.2f}%")
+            m5.metric("📉 Peor Operación", f"{peor_res:+.2f}%")
             
-            # 3. Comparativa MARKET AI vs BUY & HOLD
+            # 2. Comparativa MARKET AI vs BUY & HOLD
             st.subheader("⚔️ MARKET AI vs BUY & HOLD")
             c_comp1, c_comp2 = st.columns(2)
-            c_comp1.metric("Estrategia MARKET AI (Acumulada)", f"{ret_acum_mai:+.2f}%")
-            c_comp2.metric(f"Buy & Hold ({ticker_bt})", f"{ret_buy_hold:+.2f}%")
+            c_comp1.metric("Estrategia MARKET AI (Acumulada)", f"{ret_acum:+.2f}%")
+            c_comp2.metric(f"📊 Buy & Hold ({ticker_bt})", f"{ret_buy_hold:+.2f}%")
             
-            # 4. Precisión por Confianza y por Score
-            st.subheader("📊 Desglose de Precisión")
-            col_d1, col_d2 = st.columns(2)
-            
-            with col_d1:
-                st.markdown("**Precisión por Rango de Confianza**")
-                bins_conf = [49, 59, 69, 79, 89, 100]
-                labels_conf = ["50-59%", "60-69%", "70-79%", "80-89%", "90-100%"]
-                df_bt['rango_conf'] = pd.cut(df_bt['confianza'], bins=bins_conf, labels=labels_conf)
-                
-                conf_stats = df_bt.groupby('rango_conf', observed=False).agg(
-                    Predicciones=('resultado', 'count'),
-                    Aciertos=('resultado', lambda x: (x == "✅ Acierto").sum()),
-                    Tasa_Acierto=('resultado', lambda x: f"{((x == '✅ Acierto').sum()/len(x)*100):.1f}%" if len(x)>0 else "0%")
-                )
-                st.dataframe(conf_stats, use_container_width=True)
-                
-            with col_d2:
-                st.markdown("**Precisión por Rango de Score**")
-                bins_score = [-1, 39, 54, 69, 84, 100]
-                labels_score = ["0-39", "40-54", "55-69", "70-84", "85-100"]
-                df_bt['rango_score'] = pd.cut(df_bt['score'], bins=bins_score, labels=labels_score)
-                
-                score_stats = df_bt.groupby('rango_score', observed=False).agg(
-                    Predicciones=('resultado', 'count'),
-                    Aciertos=('resultado', lambda x: (x == "✅ Acierto").sum()),
-                    Rentabilidad_Media=('rentabilidad', lambda x: f"{x.mean():+.2f}%" if len(x)>0 else "0.00%")
-                )
-                st.dataframe(score_stats, use_container_width=True)
+            # 3. Evolución Acumulada
+            st.subheader("📈 Evolución Acumulada MARKET AI")
+            df_bt["ret_acum_mai"] = df_bt["rentabilidad"].cumsum()
+            st.line_chart(df_bt.set_index("fecha")[["ret_acum_mai"]])
 
-            # 5. Gráfico de Estrategia Acumulada
-            st.subheader("📈 Evolución Acumulada de la Estrategia")
-            df_bt["ret_acum"] = df_bt["rentabilidad"].cumsum()
-            st.line_chart(df_bt.set_index("fecha")["ret_acum"])
-
-            # 6. Qué señales funcionan mejor
-            st.subheader("🧠 ¿Qué señales funcionan mejor?")
-            ma_match = df_bt[df_bt["ma20_gt_ma50"] & (df_bt["resultado"] == "✅ Acierto")]
-            pct_ma_match = (len(ma_match) / tot_pred) * 100 if tot_pred > 0 else 0
-            
-            st.info(
-                f"Históricamente, la condición **MA20 > MA50** estuvo asociada con un acierto directo "
-                f"en el **{pct_ma_match:.1f}%** de todas las predicciones evaluadas para {ticker_bt}."
-            )
-
-            # 7. Tabla Detallada
-            st.subheader("📋 Registro de Predicciones Históricas")
+            # 4. Registros Detallados
+            st.subheader("📋 Resultados históricos")
             st.dataframe(
                 df_bt[["fecha", "ticker", "score", "direccion", "confianza", "precio_inicial", "precio_final", "rentabilidad", "resultado"]],
                 use_container_width=True
