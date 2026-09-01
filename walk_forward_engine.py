@@ -1,7 +1,32 @@
+import time
 import numpy as np
 import pandas as pd
 import streamlit as st
-from backtesting_engine import obtener_historico_cache, calcular_indicadores_historicos
+import yfinance as ticker_yf
+
+def obtener_historico_wf_safe(ticker, periodo_preferido="5y"):
+    """
+    Descarga datos historicos con reintentos exponenciales y fallbacks
+    para evitar el bloqueo por 'Too Many Requests / Rate Limited' de Yahoo Finance.
+    """
+    periodos_fallback = [periodo_preferido, "5y", "2y", "1y"]
+    # Eliminar duplicados manteniendo el orden
+    periodos_fallback = list(dict.fromkeys(periodos_fallback))
+    
+    ultimo_error = ""
+    
+    for p in periodos_fallback:
+        for intento in range(3):
+            try:
+                data = ticker_yf.Ticker(ticker).history(period=p)
+                if data is not None and not data.empty and len(data) >= 60:
+                    return data, None
+            except Exception as e:
+                ultimo_error = str(e)
+                time.sleep(1.5 * (intento + 1))  # Espera progresiva antes de reintentar
+                
+    return None, f"Error descargando histórico para {ticker}: {ultimo_error or 'Límite de peticiones alcanzado.'}"
+
 
 def calcular_mdd(series_returns):
     """Calcula el Maximum Drawdown (%) a partir de una serie de retornos porcentuales."""
@@ -12,8 +37,9 @@ def calcular_mdd(series_returns):
     dd = (cum_returns - peak) / peak
     return float(dd.min() * 100.0)
 
+
 def calcular_sharpe(series_returns, rf=0.0):
-    """Calcula el Sharpe Ratio anualizado a partir de retornos por operacion."""
+    """Calcula el Sharpe Ratio anualizado a partir de retornos por operación."""
     if len(series_returns) < 2:
         return 0.0
     std = series_returns.std()
@@ -22,24 +48,34 @@ def calcular_sharpe(series_returns, rf=0.0):
     mean_ret = series_returns.mean()
     return float((mean_ret - rf) / std * np.sqrt(252 / 20))
 
+
 @st.cache_data(ttl=86400, show_spinner=False)
-def ejecutar_walk_forward_engine(ticker, ventana_train_años=3, ventana_val_meses=12, horizonte_dias=20, es_metal=False):
+def ejecutar_walk_forward_engine(ticker, ventana_train_años=2, ventana_val_meses=6, horizonte_dias=20, es_metal=False):
     """
-    Ejecuta el analisis Walk-Forward con ventanas deslizantes estricta out-of-sample sin Look-Ahead Bias.
+    Ejecuta el análisis Walk-Forward con ventanas deslizantes estrictas Out-of-Sample sin Look-Ahead Bias,
+    resistente a Rate Limiting.
     """
-    df, err = obtener_historico_cache(ticker, periodo="10y" if not es_metal else "5y")
-    if df is None or len(df) < 500:
-        return None, f"N/D - Datos insuficientes para Walk-Forward (se requieren al menos 500 registros historicos). {err or ''}"
+    df, err = obtener_historico_wf_safe(ticker, periodo_preferido="5y" if not es_metal else "2y")
+    
+    if df is None:
+        return None, f"N/D - Datos insuficientes para Walk-Forward. {err or ''}"
 
     df = df.sort_index()
+    total_barras = len(df)
+    
+    # Adaptar requerimiento dinámicamente si hay menos datos por Rate Limit
     barras_train = int(ventana_train_años * 252)
     barras_val = int((ventana_val_meses / 12) * 252)
     paso = max(1, horizonte_dias)
-    total_barras = len(df)
     
+    # Ajuste dinámico de ventanas si el historial recuperado es más corto (ej. 1 o 2 años)
+    if total_barras < (barras_train + barras_val + horizonte_dias):
+        barras_train = max(60, int(total_barras * 0.50))
+        barras_val = max(20, int(total_barras * 0.25))
+
     min_requerido = barras_train + barras_val + horizonte_dias
-    if total_barras < min_requerido:
-        return None, f"N/D - Se requieren al menos {min_requerido} barras para esta configuracion (disponibles: {total_barras})."
+    if total_barras < min_requerido or total_barras < 100:
+        return None, f"N/D - Se requieren al menos {min_requerido} registros históricos para esta configuración (registros disponibles: {total_barras}). Intenta seleccionar un periodo más corto o reintentar en unos minutos."
 
     # Generar ventanas temporales deslizantes TRAIN -> VALIDATION
     ventanas = []
@@ -57,7 +93,7 @@ def ejecutar_walk_forward_engine(ticker, ventana_train_años=3, ventana_val_mese
         inicio_train += barras_val
 
     if not ventanas:
-        return None, "N/D - No se pudieron generar ventanas Walk-Forward suficientes con la configuracion seleccionada."
+        return None, "N/D - No se pudieron generar ventanas Walk-Forward suficientes con la cantidad de datos obtenida."
 
     pesos_actual = [30, 20, 15, 10, 15, 10]
     pesos_opt = [45, 15, 10, 10, 10, 10]
@@ -79,14 +115,28 @@ def ejecutar_walk_forward_engine(ticker, ventana_train_años=3, ventana_val_mese
             p_fin = float(df['Close'].iloc[idx + horizonte_dias])
             rent = ((p_fin - p_ini) / p_ini) * 100.0
             
-            tec = calcular_indicadores_historicos(df_slice)
+            # Cálculo de indicadores técnicos simplificados sobre la ventana
+            close_s = df_slice['Close']
+            precio_act = float(close_s.iloc[-1])
+            ma20 = float(close_s.tail(20).mean()) if len(close_s) >= 20 else precio_act
+            ma50 = float(close_s.tail(50).mean()) if len(close_s) >= 50 else precio_act
+            ma200 = float(close_s.tail(200).mean()) if len(close_s) >= 200 else precio_act
             
-            tec_score = (100 - tec["rsi"]) if tec else 50.0
-            val_score = 60.0 if tec.get("rsi", 50) < 45 else 40.0
-            fund_score = 65.0 if tec.get("ma20", 0) > tec.get("ma50", 0) else 45.0
-            crec_score = 60.0 if tec.get("momentum", 0) > 0 else 40.0
-            sent_score = 55.0 if tec.get("precio", 0) > tec.get("ma200", 0) else 45.0
-            risk_score = 40.0 if tec.get("rsi", 50) > 65 else 70.0
+            # RSI simplificado
+            delta = close_s.diff()
+            gain = (delta.where(delta > 0, 0)).tail(14).mean()
+            loss = (-delta.where(delta < 0, 0)).tail(14).mean()
+            rs = gain / loss if loss != 0 else 1.0
+            rsi = 100.0 - (100.0 / (1.0 + rs)) if not np.isnan(rs) else 50.0
+
+            momentum = ((precio_act - float(close_s.iloc[-min(10, len(close_s))])) / float(close_s.iloc[-min(10, len(close_s))])) * 100.0
+
+            tec_score = (100.0 - rsi)
+            val_score = 60.0 if rsi < 45 else 40.0
+            fund_score = 65.0 if ma20 > ma50 else 45.0
+            crec_score = 60.0 if momentum > 0 else 40.0
+            sent_score = 55.0 if precio_act > ma200 else 45.0
+            risk_score = 40.0 if rsi > 65 else 70.0
             
             def calc_score(w):
                 return (
@@ -101,7 +151,6 @@ def ejecutar_walk_forward_engine(ticker, ventana_train_años=3, ventana_val_mese
             acierto_act = (sc_act >= 50 and rent > 0) or (sc_act < 50 and rent <= 0)
             acierto_opt = (sc_opt >= 50 and rent > 0) or (sc_opt < 50 and rent <= 0)
             
-            # Niveles de Confianza y Score
             confianza = "Alta" if abs(sc_act - 50) > 15 else ("Moderada" if abs(sc_act - 50) > 5 else "Baja")
             
             p_act = {"fecha": df_slice.index[-1].strftime("%Y-%m-%d"), "rent": rent, "acierto": acierto_act, "score": sc_act, "confianza": confianza}
@@ -129,7 +178,6 @@ def ejecutar_walk_forward_engine(ticker, ventana_train_años=3, ventana_val_mese
         rets = df_p["rent"]
         hits = df_p["acierto"]
         
-        # Desglose por Confianza
         conf_summary = df_p.groupby("confianza").agg(
             Casos=("rent", "count"),
             HitRate=("acierto", lambda x: round((x.sum()/len(x))*100, 1)),
