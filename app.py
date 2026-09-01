@@ -1710,7 +1710,7 @@ st.caption("Comprueba cómo habrían funcionado históricamente las señales de 
 col_b1, col_b2, col_b3, col_b4 = st.columns(4)
 
 with col_b1:
-    tipo_activo_bt = st.radio("Tipo de Activo", ["📈 Acciones", "🥇 Metales/Futuros"], horizontal=True)
+   tipo_activo_bt = st.radio("Tipo de Activo", ["📈 Acciones", "🥇 Metales/Futuros"], horizontal=True, key="rad_tipo_activo_backtest")
 
 with col_b2:
     if tipo_activo_bt == "📈 Acciones":
