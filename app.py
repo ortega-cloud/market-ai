@@ -56,12 +56,12 @@ with col_b3:
 
 with col_b4:
     horizonte_dias = st.selectbox("Horizonte de Predicción", [1, 5, 20, 60, 120], index=2, format_func=lambda x: f"{x} Días")
-
+    
 if st.button("🔎 EJECUTAR BACKTEST", use_container_width=True):
     with st.spinner("Evaluando rendimiento histórico sin Look-Ahead Bias..."):
         res_bt = ejecutar_backtest_engine(ticker_bt, horizonte_dias, periodo_meses, es_metal=es_metal_bt)
         
-       if st.button("🔎 EJECUTAR BACKTEST", use_container_width=True):
+if st.button("🔎 EJECUTAR BACKTEST", use_container_width=True):
     with st.spinner("Evaluando rendimiento histórico sin Look-Ahead Bias..."):
         res_bt = ejecutar_backtest_engine(
             ticker=ticker_bt,
