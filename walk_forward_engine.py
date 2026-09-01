@@ -9,7 +9,7 @@ def obtener_historico_wf_safe(ticker, periodo_preferido="5y"):
     Descarga datos históricos utilizando yf.download() con reintentos exponenciales
     y soporte completo para Futuros (GC=F, SI=F, etc.) y Acciones.
     """
-    periodos_fallback = [periodo_preferido, "5y", "2y", "1y"]
+    periodos_fallback = [periodo_preferido, "5y", "2y", "1y", "max"]
     periodos_fallback = list(dict.fromkeys(periodos_fallback))
     
     ultimo_error = ""
@@ -17,20 +17,17 @@ def obtener_historico_wf_safe(ticker, periodo_preferido="5y"):
     for p in periodos_fallback:
         for intento in range(3):
             try:
-                # yf.download es más estable para tickers de futuros (GC=F, CL=F, etc.)
                 data = yf.download(ticker, period=p, progress=False, auto_adjust=True)
                 
-                # Manejar multi-index en columnas si yf.download devuelve nivele de columnas
                 if isinstance(data.columns, pd.MultiIndex):
                     data.columns = data.columns.get_level_values(0)
                 
                 if data is not None and not data.empty and len(data) >= 60:
-                    # Verificar que la columna Close existe
                     if 'Close' in data.columns:
                         return data.dropna(subset=['Close']), None
             except Exception as e:
                 ultimo_error = str(e)
-                time.sleep(1.5 * (intento + 1))
+                time.sleep(1.0 * (intento + 1))
                 
     return None, f"Error descargando histórico para {ticker}: {ultimo_error or 'Respuesta vacía o límite de peticiones alcanzado.'}"
 
@@ -59,8 +56,7 @@ def calcular_sharpe(series_returns, rf=0.0):
 @st.cache_data(ttl=86400, show_spinner=False)
 def ejecutar_walk_forward_engine(ticker, ventana_train_años=2, ventana_val_meses=6, horizonte_dias=20, es_metal=False):
     """
-    Ejecuta el análisis Walk-Forward con ventanas deslizantes Out-of-Sample sin Look-Ahead Bias,
-    soporta futuros y acciones con gestión de rate-limiting.
+    Ejecuta el análisis Walk-Forward con ventanas adaptativas dinámicas sin Look-Ahead Bias.
     """
     df, err = obtener_historico_wf_safe(ticker, periodo_preferido="5y" if not es_metal else "2y")
     
@@ -70,19 +66,32 @@ def ejecutar_walk_forward_engine(ticker, ventana_train_años=2, ventana_val_mese
     df = df.sort_index()
     total_barras = len(df)
     
-    # Configuración de ventanas adaptativas
-    barras_train = int(ventana_train_años * 252)
-    barras_val = int((ventana_val_meses / 12) * 252)
-    paso = max(1, horizonte_dias)
-    
-    # Adaptar requerimientos de ventanas si el dataset es más corto
-    if total_barras < (barras_train + barras_val + horizonte_dias):
-        barras_train = max(60, int(total_barras * 0.50))
-        barras_val = max(20, int(total_barras * 0.25))
+    # -------------------------------------------------------------
+    # REGLAS ADAPTATIVAS DE VENTANAS SEGÚN REGISTROS DISPONIBLES
+    # -------------------------------------------------------------
+    if total_barras < 150:
+        return None, f"N/D - Se requieren al menos 150 registros históricos para ejecutar Walk-Forward (disponibles: {total_barras})."
 
-    min_requerido = barras_train + barras_val + horizonte_dias
-    if total_barras < min_requerido or total_barras < 60:
-        return None, f"N/D - Se requieren al menos {min_requerido} registros históricos para esta configuración (registros disponibles: {total_barras})."
+    if 150 <= total_barras < 250:
+        # Esquema reducido (1-2 ventanas)
+        barras_train = int(total_barras * 0.65)
+        barras_val = int(total_barras * 0.20)
+        paso = max(1, int(horizonte_dias / 2))
+    elif 250 <= total_barras < 500:
+        # Esquema intermedio (múltiples ventanas)
+        barras_train = int(total_barras * 0.60)
+        barras_val = int(total_barras * 0.15)
+        paso = max(1, horizonte_dias)
+    else:
+        # Esquema completo (>= 500 registros)
+        barras_train = int(ventana_train_años * 252)
+        barras_val = int((ventana_val_meses / 12) * 252)
+        paso = max(1, horizonte_dias)
+        
+        # Ajuste de seguridad por si las opciones elegidas exceden la muestra disponible
+        if (barras_train + barras_val + horizonte_dias) > total_barras:
+            barras_train = int(total_barras * 0.50)
+            barras_val = int(total_barras * 0.20)
 
     # Generar ventanas temporales deslizantes TRAIN -> VALIDATION
     ventanas = []
@@ -100,7 +109,7 @@ def ejecutar_walk_forward_engine(ticker, ventana_train_años=2, ventana_val_mese
         inicio_train += barras_val
 
     if not ventanas:
-        return None, "N/D - No se pudieron generar ventanas Walk-Forward suficientes con la cantidad de datos obtenida."
+        return None, f"N/D - No se pudieron generar ventanas Walk-Forward válidas con la configuración calculada (Registros: {total_barras}, Train: {barras_train}, Val: {barras_val})."
 
     pesos_actual = [30, 20, 15, 10, 15, 10]
     pesos_opt = [45, 15, 10, 10, 10, 10]
@@ -122,14 +131,12 @@ def ejecutar_walk_forward_engine(ticker, ventana_train_años=2, ventana_val_mese
             p_fin = float(df['Close'].iloc[idx + horizonte_dias])
             rent = ((p_fin - p_ini) / p_ini) * 100.0
             
-            # Cálculo de indicadores técnicos sobre el slice temporal
             close_s = df_slice['Close']
             precio_act = float(close_s.iloc[-1])
             ma20 = float(close_s.tail(20).mean()) if len(close_s) >= 20 else precio_act
             ma50 = float(close_s.tail(50).mean()) if len(close_s) >= 50 else precio_act
             ma200 = float(close_s.tail(200).mean()) if len(close_s) >= 200 else precio_act
             
-            # RSI
             delta = close_s.diff()
             gain = (delta.where(delta > 0, 0)).tail(14).mean()
             loss = (-delta.where(delta < 0, 0)).tail(14).mean()
@@ -213,6 +220,12 @@ def ejecutar_walk_forward_engine(ticker, ventana_train_años=2, ventana_val_mese
     buy_hold_total = round(((p_fin_bh - p_ini_bh) / p_ini_bh) * 100.0, 2)
 
     return {
+        "info_dataset": {
+            "total_registros": total_barras,
+            "train_size": barras_train,
+            "val_size": barras_val,
+            "num_ventanas": len(ventanas)
+        },
         "resumen_actual": res_act,
         "resumen_optimizado": res_opt,
         "buy_hold_total": buy_hold_total,
