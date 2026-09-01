@@ -1710,22 +1710,24 @@ st.caption("Comprueba cómo habrían funcionado históricamente las señales de 
 col_b1, col_b2, col_b3, col_b4 = st.columns(4)
 
 with col_b1:
-   tipo_activo_bt = st.radio("Tipo de Activo", ["📈 Acciones", "🥇 Metales/Futuros"], horizontal=True, key="rad_tipo_activo_backtest")
+  col_b1, col_b2, col_b3, col_b4 = st.columns(4)
+
+with col_b1:
+    tipo_activo_bt = st.radio("Tipo de Activo", ["📈 Acciones", "🥇 Metales/Futuros"], horizontal=True, key="rad_tipo_activo_bt_unique")
 
 with col_b2:
     if tipo_activo_bt == "📈 Acciones":
-        ticker_bt = st.text_input("Ticker Backtest", value="AAPL").upper()
+        ticker_bt = st.text_input("Ticker Backtest", value="AAPL", key="txt_ticker_bt_unique").upper()
         es_metal_bt = False
     else:
-        ticker_bt = st.selectbox("Metal / Futuro Backtest", ["GC=F", "SI=F", "HG=F", "CL=F"])
+        ticker_bt = st.selectbox("Metal / Futuro Backtest", ["GC=F", "SI=F", "HG=F", "CL=F"], key="sb_metal_bt_unique")
         es_metal_bt = True
 
 with col_b3:
-    periodo_meses = st.selectbox("Periodo Histórico Evaluado", [3, 6, 12, 24], index=2, format_func=lambda x: f"{x} Meses")
+    periodo_meses = st.selectbox("Periodo Histórico Evaluado", [3, 6, 12, 24], index=2, format_func=lambda x: f"{x} Meses", key="sb_periodo_meses_bt_unique")
 
 with col_b4:
-    horizonte_dias = st.selectbox("Horizonte de Predicción", [1, 5, 20, 60, 120], index=2, format_func=lambda x: f"{x} Días")
-
+    horizonte_dias = st.selectbox("Horizonte de Predicción", [1, 5, 20, 60, 120], index=2, format_func=lambda x: f"{x} Días", key="sb_horizonte_dias_bt_unique")
 # 2. Botón de Ejecución con parámetros explicito
 if st.button("🔎 EJECUTAR BACKTEST", use_container_width=True):
     with st.spinner("Evaluando rendimiento histórico sin Look-Ahead Bias..."):
