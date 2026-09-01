@@ -1978,7 +1978,7 @@ from walk_forward_engine import ejecutar_walk_forward_engine
 
 st.divider()
 st.header("🔬 WALK-FORWARD VALIDATION ENGINE")
-st.caption("Evaluación fuera de muestra (Out-of-Sample) con ventanas temporales deslizantes estrictas.")
+st.caption("Evaluación fuera de muestra (Out-of-Sample) con ventanas temporales deslizantes adaptativas.")
 
 col_wf1, col_wf2, col_wf3, col_wf4 = st.columns(4)
 
@@ -2012,11 +2012,21 @@ if st.button("🚀 EJECUTAR WALK-FORWARD VALIDATION", use_container_width=True, 
         if res_wf is None:
             st.warning(f"⚠️ {err_wf}")
         else:
+            info = res_wf["info_dataset"]
+            
+            # MOSTRAR INDICADORES INFORMATIVOS DEL DATASET Y VENTANAS
+            st.info(
+                f"📊 **Métricas de la Muestra Utilizada:**  \n"
+                f"- **Datos históricos disponibles:** `{info['total_registros']} barras`  \n"
+                f"- **Train por ventana:** `{info['train_size']} barras`  \n"
+                f"- **Validation por ventana:** `{info['val_size']} barras`  \n"
+                f"- **Ventanas utilizadas:** `{info['num_ventanas']}`"
+            )
+
             r_act = res_wf["resumen_actual"]
             r_opt = res_wf["resumen_optimizado"]
             bh_tot = res_wf["buy_hold_total"]
             
-            # 1. TABLA DE RESULTADOS ACUMULADOS
             st.subheader("📊 Comparación Fuera de Muestra (Out-of-Sample)")
             
             df_comp = pd.DataFrame({
@@ -2059,11 +2069,9 @@ if st.button("🚀 EJECUTAR WALK-FORWARD VALIDATION", use_container_width=True, 
             })
             st.dataframe(df_comp, use_container_width=True)
 
-            # 2. RENDIMIENTO POR PERIODO
             st.subheader(f"🔄 Rendimiento por Periodo Walk-Forward ({res_wf['num_ventanas']} Ventanas)")
             st.dataframe(res_wf["tabla_ventanas"], use_container_width=True)
 
-            # 3. GRÁFICOS
             st.subheader("📈 Curva de Equity Out-of-Sample")
             df_chart = pd.DataFrame({
                 "Fecha": res_wf["df_preds_act"]["fecha"],
@@ -2072,7 +2080,6 @@ if st.button("🚀 EJECUTAR WALK-FORWARD VALIDATION", use_container_width=True, 
             }).set_index("Fecha")
             st.line_chart(df_chart)
 
-            # 4. CONTROL DE OVERFITTING Y DICTAMEN AUTOMÁTICO
             st.subheader("🧠 Control de Overfitting y Dictamen")
             diff_hr = r_opt["hit_rate"] - r_act["hit_rate"]
             ventanas_df = res_wf["tabla_ventanas"]
