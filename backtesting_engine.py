@@ -3,6 +3,7 @@ import pandas as pd
 import streamlit as st
 
 @st.cache_data(ttl=86400, show_spinner=False)
+@st.cache_data(ttl=86400, show_spinner=False)
 def obtener_historico_cache(ticker, periodo="5y"):
     """
     Descarga y cachea los datos históricos usando yfinance.
@@ -10,7 +11,8 @@ def obtener_historico_cache(ticker, periodo="5y"):
     """
     import yfinance as yf
     try:
-        data = yf.Ticker(ticker).history(period=period)
+        # CORRECCIÓN: Se usa period=periodo para coincidir con el nombre del argumento
+        data = yf.Ticker(ticker).history(period=periodo)
         if data is None or data.empty:
             return None, f"No se encontraron datos para el ticker '{ticker}'."
         if len(data) < 20:
