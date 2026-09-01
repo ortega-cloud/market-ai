@@ -2,15 +2,14 @@ import time
 import numpy as np
 import pandas as pd
 import streamlit as st
-import yfinance as ticker_yf
+import yfinance as yf
 
 def obtener_historico_wf_safe(ticker, periodo_preferido="5y"):
     """
-    Descarga datos historicos con reintentos exponenciales y fallbacks
-    para evitar el bloqueo por 'Too Many Requests / Rate Limited' de Yahoo Finance.
+    Descarga datos históricos utilizando yf.download() con reintentos exponenciales
+    y soporte completo para Futuros (GC=F, SI=F, etc.) y Acciones.
     """
     periodos_fallback = [periodo_preferido, "5y", "2y", "1y"]
-    # Eliminar duplicados manteniendo el orden
     periodos_fallback = list(dict.fromkeys(periodos_fallback))
     
     ultimo_error = ""
@@ -18,14 +17,22 @@ def obtener_historico_wf_safe(ticker, periodo_preferido="5y"):
     for p in periodos_fallback:
         for intento in range(3):
             try:
-                data = ticker_yf.Ticker(ticker).history(period=p)
+                # yf.download es más estable para tickers de futuros (GC=F, CL=F, etc.)
+                data = yf.download(ticker, period=p, progress=False, auto_adjust=True)
+                
+                # Manejar multi-index en columnas si yf.download devuelve nivele de columnas
+                if isinstance(data.columns, pd.MultiIndex):
+                    data.columns = data.columns.get_level_values(0)
+                
                 if data is not None and not data.empty and len(data) >= 60:
-                    return data, None
+                    # Verificar que la columna Close existe
+                    if 'Close' in data.columns:
+                        return data.dropna(subset=['Close']), None
             except Exception as e:
                 ultimo_error = str(e)
-                time.sleep(1.5 * (intento + 1))  # Espera progresiva antes de reintentar
+                time.sleep(1.5 * (intento + 1))
                 
-    return None, f"Error descargando histórico para {ticker}: {ultimo_error or 'Límite de peticiones alcanzado.'}"
+    return None, f"Error descargando histórico para {ticker}: {ultimo_error or 'Respuesta vacía o límite de peticiones alcanzado.'}"
 
 
 def calcular_mdd(series_returns):
@@ -52,8 +59,8 @@ def calcular_sharpe(series_returns, rf=0.0):
 @st.cache_data(ttl=86400, show_spinner=False)
 def ejecutar_walk_forward_engine(ticker, ventana_train_años=2, ventana_val_meses=6, horizonte_dias=20, es_metal=False):
     """
-    Ejecuta el análisis Walk-Forward con ventanas deslizantes estrictas Out-of-Sample sin Look-Ahead Bias,
-    resistente a Rate Limiting.
+    Ejecuta el análisis Walk-Forward con ventanas deslizantes Out-of-Sample sin Look-Ahead Bias,
+    soporta futuros y acciones con gestión de rate-limiting.
     """
     df, err = obtener_historico_wf_safe(ticker, periodo_preferido="5y" if not es_metal else "2y")
     
@@ -63,19 +70,19 @@ def ejecutar_walk_forward_engine(ticker, ventana_train_años=2, ventana_val_mese
     df = df.sort_index()
     total_barras = len(df)
     
-    # Adaptar requerimiento dinámicamente si hay menos datos por Rate Limit
+    # Configuración de ventanas adaptativas
     barras_train = int(ventana_train_años * 252)
     barras_val = int((ventana_val_meses / 12) * 252)
     paso = max(1, horizonte_dias)
     
-    # Ajuste dinámico de ventanas si el historial recuperado es más corto (ej. 1 o 2 años)
+    # Adaptar requerimientos de ventanas si el dataset es más corto
     if total_barras < (barras_train + barras_val + horizonte_dias):
         barras_train = max(60, int(total_barras * 0.50))
         barras_val = max(20, int(total_barras * 0.25))
 
     min_requerido = barras_train + barras_val + horizonte_dias
-    if total_barras < min_requerido or total_barras < 100:
-        return None, f"N/D - Se requieren al menos {min_requerido} registros históricos para esta configuración (registros disponibles: {total_barras}). Intenta seleccionar un periodo más corto o reintentar en unos minutos."
+    if total_barras < min_requerido or total_barras < 60:
+        return None, f"N/D - Se requieren al menos {min_requerido} registros históricos para esta configuración (registros disponibles: {total_barras})."
 
     # Generar ventanas temporales deslizantes TRAIN -> VALIDATION
     ventanas = []
@@ -115,14 +122,14 @@ def ejecutar_walk_forward_engine(ticker, ventana_train_años=2, ventana_val_mese
             p_fin = float(df['Close'].iloc[idx + horizonte_dias])
             rent = ((p_fin - p_ini) / p_ini) * 100.0
             
-            # Cálculo de indicadores técnicos simplificados sobre la ventana
+            # Cálculo de indicadores técnicos sobre el slice temporal
             close_s = df_slice['Close']
             precio_act = float(close_s.iloc[-1])
             ma20 = float(close_s.tail(20).mean()) if len(close_s) >= 20 else precio_act
             ma50 = float(close_s.tail(50).mean()) if len(close_s) >= 50 else precio_act
             ma200 = float(close_s.tail(200).mean()) if len(close_s) >= 200 else precio_act
             
-            # RSI simplificado
+            # RSI
             delta = close_s.diff()
             gain = (delta.where(delta > 0, 0)).tail(14).mean()
             loss = (-delta.where(delta < 0, 0)).tail(14).mean()
