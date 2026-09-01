@@ -1731,17 +1731,30 @@ with col_b4:
 # 2. Botón de Ejecución con parámetros explicito
 if st.button("🔎 EJECUTAR BACKTEST", use_container_width=True):
     with st.spinner("Evaluando rendimiento histórico sin Look-Ahead Bias..."):
-        res_bt = ejecutar_backtest_engine(
+       res_bt = ejecutar_backtest_engine(
             ticker=ticker_bt,
             periodo_meses=periodo_meses,
             horizonte_dias=horizonte_dias,
             es_metal=es_metal_bt
         )
         
-        if res_bt is None:
-            st.warning("N/D - Datos históricos insuficientes para el periodo y horizonte seleccionados.")
+        # Unpack y asignación segura
+        df_bt = None
+        err_msg = "No se pudieron obtener datos históricos suficientes."
+
+        if isinstance(res_bt, tuple) and res_bt[0] is not None:
+            if isinstance(res_bt[0], tuple):
+                df_bt = res_bt[0][0]
+            elif isinstance(res_bt[0], pd.DataFrame):
+                df_bt = res_bt[0]
+        elif isinstance(res_bt, dict):
+            df_bt = res_bt.get("resultados")
+
+        # VALIDACIÓN SEGURA (Soluciona el AttributeError)
+        if df_bt is None or not isinstance(df_bt, pd.DataFrame) or df_bt.empty:
+            st.warning(f"⚠️ {err_msg if isinstance(err_msg, str) else 'Datos insuficientes para procesar el análisis.'}")
         else:
-            df_bt, ret_buy_hold = res_bt
+            # Continúa con el despliegue normal de métricas y gráficos
             
             if df_bt.empty:
                 st.warning("N/D - No se pudieron generar muestras con los parámetros seleccionados.")
