@@ -1970,3 +1970,121 @@ if st.button("🚀 EJECUTAR OPTIMIZACIÓN DE MODELO", use_container_width=True, 
             st.subheader("🎯 Ranking de Fiabilidad de Señales Individuales")
             df_senales_disp = res_opt["tabla_senales"].drop(columns=["_pct_val"], errors="ignore")
             st.dataframe(df_senales_disp, use_container_width=True)
+
+# ==========================================
+# SECCIÓN: WALK-FORWARD VALIDATION ENGINE
+# ==========================================
+from walk_forward_engine import ejecutar_walk_forward_engine
+
+st.divider()
+st.header("🔬 WALK-FORWARD VALIDATION ENGINE")
+st.caption("Evaluación fuera de muestra (Out-of-Sample) con ventanas temporales deslizantes estrictas.")
+
+col_wf1, col_wf2, col_wf3, col_wf4 = st.columns(4)
+
+with col_wf1:
+    tipo_activo_wf = st.radio("Mercado WF", ["📈 Acciones", "🥇 Metales/Futuros"], horizontal=True, key="rad_wf_market_unique")
+
+with col_wf2:
+    if tipo_activo_wf == "📈 Acciones":
+        ticker_wf = st.text_input("Ticker Walk-Forward", value="AAPL", key="txt_wf_ticker_unique").upper()
+        es_metal_wf = False
+    else:
+        ticker_wf = st.selectbox("Metal / Futuro WF", ["GC=F", "SI=F", "HG=F", "CL=F"], key="sb_wf_metal_unique")
+        es_metal_wf = True
+
+with col_wf3:
+    train_anos_wf = st.selectbox("Ventana Entrenamiento", [2, 3, 5], index=1, format_func=lambda x: f"{x} Años", key="sb_wf_train_unique")
+
+with col_wf4:
+    horizonte_wf = st.selectbox("Horizonte Evaluación", [5, 20, 60], index=1, format_func=lambda x: f"{x} Días", key="sb_wf_horiz_unique")
+
+if st.button("🚀 EJECUTAR WALK-FORWARD VALIDATION", use_container_width=True, key="btn_run_walk_forward_unique"):
+    with st.spinner("Procesando simulaciones fuera de muestra deslizantes..."):
+        res_wf, err_wf = ejecutar_walk_forward_engine(
+            ticker=ticker_wf,
+            ventana_train_años=train_anos_wf,
+            ventana_val_meses=12,
+            horizonte_dias=horizonte_wf,
+            es_metal=es_metal_wf
+        )
+        
+        if res_wf is None:
+            st.warning(f"⚠️ {err_wf}")
+        else:
+            r_act = res_wf["resumen_actual"]
+            r_opt = res_wf["resumen_optimizado"]
+            bh_tot = res_wf["buy_hold_total"]
+            
+            # 1. TABLA DE RESULTADOS ACUMULADOS
+            st.subheader("📊 Comparación Fuera de Muestra (Out-of-Sample)")
+            
+            df_comp = pd.DataFrame({
+                "Métrica": [
+                    "Número Total Predicciones",
+                    "Hit Rate (Tasa Acierto)",
+                    "Rentabilidad Media / Op.",
+                    "Mediana de Rentabilidad",
+                    "Mejor Operación",
+                    "Peor Operación",
+                    "Sharpe Ratio Anualizado",
+                    "Maximum Drawdown (MDD)",
+                    "Retorno Acumulado Total"
+                ],
+                "Modelo Actual": [
+                    r_act["total_predicciones"],
+                    f"{r_act['hit_rate']}%",
+                    f"{r_act['avg_return']:+.2f}%",
+                    f"{r_act['median_return']:+.2f}%",
+                    f"{r_act['best_return']:+.2f}%",
+                    f"{r_act['worst_return']:+.2f}%",
+                    r_act["sharpe"],
+                    f"{r_act['mdd']:.2f}%",
+                    f"{r_act['ret_acum']:+.2f}%"
+                ],
+                "Modelo Optimizado": [
+                    r_opt["total_predicciones"],
+                    f"{r_opt['hit_rate']}%",
+                    f"{r_opt['avg_return']:+.2f}%",
+                    f"{r_opt['median_return']:+.2f}%",
+                    f"{r_opt['best_return']:+.2f}%",
+                    f"{r_opt['worst_return']:+.2f}%",
+                    r_opt["sharpe"],
+                    f"{r_opt['mdd']:.2f}%",
+                    f"{r_opt['ret_acum']:+.2f}%"
+                ],
+                "Buy & Hold": [
+                    "N/A", "N/A", "N/A", "N/A", "N/A", "N/A", "N/A", "N/A", f"{bh_tot:+.2f}%"
+                ]
+            })
+            st.dataframe(df_comp, use_container_width=True)
+
+            # 2. RENDIMIENTO POR PERIODO
+            st.subheader(f"🔄 Rendimiento por Periodo Walk-Forward ({res_wf['num_ventanas']} Ventanas)")
+            st.dataframe(res_wf["tabla_ventanas"], use_container_width=True)
+
+            # 3. GRÁFICOS
+            st.subheader("📈 Curva de Equity Out-of-Sample")
+            df_chart = pd.DataFrame({
+                "Fecha": res_wf["df_preds_act"]["fecha"],
+                "Modelo Actual": res_wf["df_preds_act"]["rent"].cumsum(),
+                "Modelo Optimizado": res_wf["df_preds_opt"]["rent"].cumsum()
+            }).set_index("Fecha")
+            st.line_chart(df_chart)
+
+            # 4. CONTROL DE OVERFITTING Y DICTAMEN AUTOMÁTICO
+            st.subheader("🧠 Control de Overfitting y Dictamen")
+            diff_hr = r_opt["hit_rate"] - r_act["hit_rate"]
+            ventanas_df = res_wf["tabla_ventanas"]
+            ventanas_ganadas = sum(1 for diff in ventanas_df["Mejora (%)"] if diff > 0)
+            pct_consistencia = (ventanas_ganadas / len(ventanas_df)) * 100.0 if len(ventanas_df) > 0 else 0.0
+
+            st.write(f"- **Mejora en Validación:** {diff_hr:+.1f}% en Hit Rate.")
+            st.write(f"- **Consistencia:** El modelo optimizado supera al actual en {ventanas_ganadas} de {len(ventanas_df)} ventanas ({pct_consistencia:.0f}%).")
+
+            if diff_hr > 1.5 and pct_consistencia >= 60.0:
+                st.success("🟢 **¿LA MEJORA ES CONSISTENTE?: SÍ.** Se recomienda recalibrar los pesos en producción.")
+            elif diff_hr > 0:
+                st.warning("🟡 **¿LA MEJORA ES CONSISTENTE?: DUDOSO.** La mejora no es uniforme entre periodos. Se recomienda mantener los pesos activos.")
+            else:
+                st.error("🔴 **¿LA MEJORA ES CONSISTENTE?: NO (OVERFITTING DETECTADO).** El modelo optimizado empeora fuera de muestra.")
