@@ -1729,26 +1729,85 @@ with col_b3:
 with col_b4:
     horizonte_dias = st.selectbox("Horizonte de Predicción", [1, 5, 20, 60, 120], index=2, format_func=lambda x: f"{x} Días", key="sb_horizonte_dias_bt_unique")
 # 2. Botón de Ejecución con parámetros explicito
-if st.button("🔎 EJECUTAR BACKTEST", use_container_width=True):
+if st.button("🔎 EJECUTAR BACKTEST", use_container_width=True, key="btn_backtest_final_safe"):
     with st.spinner("Evaluando rendimiento histórico sin Look-Ahead Bias..."):
-       res_bt = ejecutar_backtest_engine(
+        res_bt = ejecutar_backtest_engine(
             ticker=ticker_bt,
             periodo_meses=periodo_meses,
             horizonte_dias=horizonte_dias,
             es_metal=es_metal_bt
         )
         
-        # Unpack y asignación segura
+        # Desempaquetado seguro de variables
         df_bt = None
+        ret_buy_hold = 0.0
+        metricas = None
         err_msg = "No se pudieron obtener datos históricos suficientes."
 
-        if isinstance(res_bt, tuple) and res_bt[0] is not None:
-            if isinstance(res_bt[0], tuple):
-                df_bt = res_bt[0][0]
-            elif isinstance(res_bt[0], pd.DataFrame):
-                df_bt = res_bt[0]
+        if isinstance(res_bt, tuple):
+            # Si devolvió (None, "Mensaje de error")
+            if res_bt[0] is None:
+                err_msg = res_bt[1] if len(res_bt) > 1 else err_msg
+            else:
+                # Si devolvió ((df_res, ret_buy_hold), resultado_completo)
+                first_elem = res_bt[0]
+                if isinstance(first_elem, tuple):
+                    df_bt = first_elem[0]
+                    ret_buy_hold = first_elem[1] if len(first_elem) > 1 else 0.0
+                elif isinstance(first_elem, pd.DataFrame):
+                    df_bt = first_elem
+                    ret_buy_hold = res_bt[1] if len(res_bt) > 1 and isinstance(res_bt[1], (int, float)) else 0.0
+                
+                if len(res_bt) > 1 and isinstance(res_bt[1], dict):
+                    metricas = res_bt[1].get("metricas")
+
         elif isinstance(res_bt, dict):
             df_bt = res_bt.get("resultados")
+            ret_buy_hold = res_bt.get("buy_hold", 0.0)
+            metricas = res_bt.get("metricas")
+
+        # VALIDACIÓN FINAL
+        if df_bt is None or not isinstance(df_bt, pd.DataFrame) or df_bt.empty:
+            st.warning(f"⚠️ {err_msg}")
+        else:
+            # Si no hay diccionario de métricas precalculado, se derivan del DataFrame
+            if metricas is None:
+                tot_pred = len(df_bt)
+                aciertos = len(df_bt[df_bt["resultado"] == "✅ Acierto"])
+                tasa_acierto = (aciertos / tot_pred) * 100.0 if tot_pred > 0 else 0.0
+                metricas = {
+                    "numero_predicciones": tot_pred,
+                    "tasa_acierto": round(tasa_acierto, 1),
+                    "rentabilidad_media": round(float(df_bt["rentabilidad"].mean()), 2),
+                    "mejor_resultado": round(float(df_bt["rentabilidad"].max()), 2),
+                    "peor_resultado": round(float(df_bt["rentabilidad"].min()), 2),
+                    "retorno_total": round(float(df_bt["rentabilidad"].sum()), 2),
+                    "retorno_buy_hold": round(ret_buy_hold, 2)
+                }
+
+            # Renderizado de la interfaz
+            st.subheader("🎯 Resumen de Rendimiento")
+            m1, m2, m3, m4, m5 = st.columns(5)
+            m1.metric("📊 Predicciones", metricas["numero_predicciones"])
+            m2.metric("🎯 Tasa de Acierto", f"{metricas['tasa_acierto']}%")
+            m3.metric("📈 Rentabilidad Media", f"{metricas['rentabilidad_media']:+.2f}%")
+            m4.metric("🚀 Mejor Operación", f"{metricas['mejor_resultado']:+.2f}%")
+            m5.metric("📉 Peor Operación", f"{metricas['peor_resultado']:+.2f}%")
+            
+            st.subheader("⚔️ MARKET AI vs BUY & HOLD")
+            c_comp1, c_comp2 = st.columns(2)
+            c_comp1.metric("Estrategia MARKET AI (Acumulada)", f"{metricas['retorno_total']:+.2f}%")
+            c_comp2.metric(f"📊 Buy & Hold ({ticker_bt})", f"{metricas['retorno_buy_hold']:+.2f}%")
+            
+            st.subheader("📈 Evolución Acumulada MARKET AI")
+            df_bt["ret_acum_mai"] = df_bt["rentabilidad"].cumsum()
+            st.line_chart(df_bt.set_index("fecha")[["ret_acum_mai"]])
+
+            st.subheader("📋 Resultados históricos")
+            st.dataframe(
+                df_bt[["fecha", "ticker", "score", "direccion", "confianza", "precio_inicial", "precio_final", "rentabilidad", "resultado"]],
+                use_container_width=True
+            )
 
         # VALIDACIÓN SEGURA (Soluciona el AttributeError)
         if df_bt is None or not isinstance(df_bt, pd.DataFrame) or df_bt.empty:
