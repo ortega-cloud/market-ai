@@ -124,7 +124,7 @@ def evaluar_backtest_hibrido(ticker="AAPL", periodo="5y", es_metal=False):
             resultados_comparativa[h_key] = {"error": err_m}
             continue
 
-        clf = res_ml["_model_obj"]
+        clf = res_ml.get("_model_obj") or res_ml.get("model")
         features = res_ml["features_utilizadas"]
 
         X_test = df_test[features].fillna(0)
