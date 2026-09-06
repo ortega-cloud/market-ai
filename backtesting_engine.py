@@ -3,8 +3,14 @@ import pandas as pd
 import streamlit as st
 # Dentro del bucle de simulación día a día en backtesting_engine.py:
 from signals_engine import simular_senal_historica
-
-# ...
+def ejecutar_backtest_engine(df_test, ...):
+    """
+    Función principal de backtesting.
+    Recibe 'df_test' como argumento.
+    """
+    posicion = 0
+    precio_entrada = 0.0
+    operaciones = []# ...
 for i in range(len(df_test)):
     row = df_test.iloc[i]
     score_t = df_test['SCORE_HISTORICO'].iloc[i] if 'SCORE_HISTORICO' in df_test else 50.0
