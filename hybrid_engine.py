@@ -37,8 +37,7 @@ def score_a_probabilidades(score):
 
 def calcular_prediccion_hibrida(score_market_ai, ml_proba_map, peso_market_ai=0.60, peso_ml=0.40):
     """
-    Combina las probabilidades derivadas del Score con las del ML mediante
-    ponderación lineal (60/40), detecta conflictos/acuerdos y calcula la confianza final.
+    Combina las probabilidades del Score y ML (60/40), detecta conflictos y ajusta la confianza.
     """
     if not ml_proba_map:
         p_score = score_a_probabilidades(score_market_ai)
@@ -96,8 +95,7 @@ def calcular_prediccion_hibrida(score_market_ai, ml_proba_map, peso_market_ai=0.
 
 def evaluar_backtest_hibrido(ticker="AAPL", periodo="5y", es_metal=False):
     """
-    Ejecuta una evaluación sobre la muestra de VALIDACIÓN/TEST (30% Out-of-Sample)
-    comparando MARKET AI, ML, HYBRID y BUY & HOLD para todos los horizontes.
+    Ejecuta la evaluación Out-of-Sample (30%) comparando estrategias.
     """
     df_ml, err = generar_ml_dataset(ticker=ticker, periodo=periodo, es_metal=es_metal)
     if df_ml is None or df_ml.empty:
@@ -143,7 +141,7 @@ def evaluar_backtest_hibrido(ticker="AAPL", periodo="5y", es_metal=False):
         ml_preds = clf.predict(X_test)
         ml_probas = clf.predict_proba(X_test)
 
-        # INICIALIZACIÓN EXPLÍCITA DE METRICS (EVITA EL NAMEERROR)
+        # DEFINICIÓN EXPLÍCITA DE METRICS DENTRO DEL HORIZONTE
         metrics = {
             "MARKET_AI": [],
             "ML": [],
