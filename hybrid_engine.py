@@ -2,6 +2,9 @@ import numpy as np
 import pandas as pd
 from ml_model import HORIZONTES_CONFIG, predecir_multihorizonte_actual, entrenar_modelo_horizonte
 from ml_dataset_engine import generar_ml_dataset, clasificar_target
+from sklearn.ensemble import RandomForestClassifier
+import joblib
+import os
 
 def score_a_probabilidades(score):
     """
@@ -124,14 +127,27 @@ def evaluar_backtest_hibrido(ticker="AAPL", periodo="5y", es_metal=False):
             resultados_comparativa[h_key] = {"error": err_m}
             continue
 
-        clf = res_ml.get("_model_obj") or res_ml.get("model")
-        features = res_ml["features_utilizadas"]
+       # Obtener o cargar el modelo entrenado
+        clf = None
+        if isinstance(res_ml.get("model"), RandomForestClassifier):
+            clf = res_ml["model"]
+        elif isinstance(res_ml.get("_model_obj"), RandomForestClassifier):
+            clf = res_ml["_model_obj"]
+        elif os.path.exists(cfg["model_file"]):
+            # Carga de respaldo directa desde el archivo joblib
+            saved_data = joblib.load(cfg["model_file"])
+            clf = saved_data.get("model")
 
+        if clf is None or not hasattr(clf, "predict"):
+            resultados_comparativa[h_key] = {"error": "Error: Objeto de modelo ML no válido para inferencia."}
+            continue
+
+        features = res_ml.get("features_utilizadas", [])
         X_test = df_test[features].fillna(0)
+
+        # Inferencia segura de predicciones y probabilidades
         ml_preds = clf.predict(X_test)
         ml_probas = clf.predict_proba(X_test)
-
-        metrics = {"MARKET_AI": [], "ML": [], "HYBRID": [], "BUY_HOLD": []}
 
         for idx, (_, row) in enumerate(df_test.iterrows()):
             ret_real = row[target_col]
