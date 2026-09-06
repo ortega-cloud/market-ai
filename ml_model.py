@@ -137,7 +137,9 @@ def entrenar_modelo_horizonte(df_ml, target_col, model_path):
     proba_map = dict(zip(clf.classes_, latest_probas))
     confianza = float(np.max(latest_probas) * 100.0)
 
-    return {
+   return {
+        "model": clf,
+        "_model_obj": clf,  # Servirá para compatibilidad directa con hybrid_engine.py
         "train_samples": len(X_train),
         "test_samples": len(X_test),
         "accuracy": acc,
