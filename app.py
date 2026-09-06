@@ -2168,85 +2168,115 @@ if st.button("⚙️ GENERAR DATASET ML", use_container_width=True, key="btn_run
             )
 
 # ==========================================
-# SECCIÓN: MARKET AI MACHINE LEARNING
+# SECCIÓN: MARKET AI MACHINE LEARNING MULTIHORIZONTE
 # ==========================================
-from ml_model import entrenar_modelo_ml
+from ml_model import entrenar_modelos_multihorizonte, predecir_multihorizonte_actual, HORIZONTES_CONFIG
 
 st.divider()
-st.header("🤖 MARKET AI MACHINE LEARNING")
-st.caption("Primer Modelo Evaluado de Forma Independiente (Random Forest Classifier)")
+st.header("🤖 MARKET AI MACHINE LEARNING MULTIHORIZONTE")
+st.caption("Entrenamiento y evaluación de modelos independientes por horizonte (5D, 20D, 60D y 120D)")
 
-col_m1, col_m2, col_m3 = st.columns(3)
+col_mh1, col_mh2, col_mh3 = st.columns(3)
 
-with col_m1:
-    tipo_activo_ml_mod = st.radio("Mercado", ["📈 Acciones", "🥇 Metales/Futuros"], horizontal=True, key="rad_ml_mod_market")
+with col_mh1:
+    tipo_activo_mh = st.radio("Mercado Multihorizonte", ["📈 Acciones", "🥇 Metales/Futuros"], horizontal=True, key="rad_mh_market")
 
-with col_m2:
-    if tipo_activo_ml_mod == "📈 Acciones":
-        ticker_ml_mod = st.text_input("Ticker Modelo", value="AAPL", key="txt_ml_mod_ticker").upper()
-        es_metal_ml_mod = False
+with col_mh2:
+    if tipo_activo_mh == "📈 Acciones":
+        ticker_mh = st.text_input("Ticker Multihorizonte", value="AAPL", key="txt_mh_ticker").upper()
+        es_metal_mh = False
     else:
-        ticker_ml_mod = st.selectbox("Metal / Futuro", ["GC=F", "SI=F", "HG=F", "CL=F"], key="sb_ml_mod_metal")
-        es_metal_ml_mod = True
+        ticker_mh = st.selectbox("Metal / Futuro Multihorizonte", ["GC=F", "SI=F", "HG=F", "CL=F"], key="sb_mh_metal")
+        es_metal_mh = True
 
-with col_m3:
-    periodo_ml_mod = st.selectbox("Periodo Entrenamiento", ["2y", "5y", "max"], index=1, key="sb_ml_mod_period")
+with col_mh3:
+    periodo_mh = st.selectbox("Periodo Entrenamiento Multihorizonte", ["2y", "5y", "max"], index=1, key="sb_mh_period")
 
-if st.button("🔄 ENTRENAR MODELO ML", use_container_width=True, key="btn_train_ml_model"):
-    with st.spinner("Entrenando RandomForest, dividiendo 70/30 e imputando datos de forma segura..."):
-        res_mod, err_mod = entrenar_modelo_ml(
-            ticker=ticker_ml_mod,
-            periodo=periodo_ml_mod,
-            es_metal=es_metal_ml_mod
+if st.button("🔄 ENTRENAR MODELOS MULTIHORIZONTE", use_container_width=True, key="btn_train_multihorizonte"):
+    with st.spinner("Entrenando 4 modelos independientes (5D, 20D, 60D, 120D)..."):
+        res_mh, err_mh = entrenar_modelos_multihorizonte(
+            ticker=ticker_mh,
+            periodo=periodo_mh,
+            es_metal=es_metal_mh
         )
         
-        if res_mod is None:
-            st.warning(f"⚠️ {err_mod}")
+        if res_mh is None:
+            st.warning(f"⚠️ {err_mh}")
         else:
-            st.success("✅ Modelo entrenado y guardado correctamente en `models/market_ai_model.pkl`.")
-
-            # Muestras y Métricas Generales
-            st.subheader("📊 Resumen del Entrenamiento y Evaluación (OOS)")
-            c_m1, c_m2, c_m3, c_m4, c_m5 = st.columns(5)
-            c_m1.metric("Modelo", "RandomForest")
-            c_m2.metric("Train Samples (70%)", res_mod["train_samples"])
-            c_m3.metric("Test Samples (30%)", res_mod["test_samples"])
-            c_m4.metric("Accuracy Test", f"{res_mod['accuracy']*100:.1f}%")
-            c_m5.metric("F1-Score Test", f"{res_mod['f1_score']*100:.1f}%")
-
-            # Matriz de Confusión y Probabilidades
-            c_l1, c_l2 = st.columns(2)
+            st.success("✅ Modelos entrenados y guardados en `models/market_ai_[5d|20d|60d|120d].pkl`")
             
-            with c_l1:
-                st.subheader("🧩 Matriz de Confusión (Test Set)")
-                df_cm = pd.DataFrame(
-                    res_mod["confusion_matrix"], 
-                    index=[f"Real: {c}" for c in res_mod["classes"]],
-                    columns=[f"Pred: {c}" for c in res_mod["classes"]]
-                )
-                st.dataframe(df_cm, use_container_width=True)
+            # 1. TABLA COMPARATIVA DE DESEMPEÑO ENTRE HORIZONTES
+            st.subheader("📊 Comparativa de Rendimiento Out-of-Sample (TEST 30%)")
+            filas_comp = []
+            
+            for h_key, cfg in HORIZONTES_CONFIG.items():
+                datos_h = res_mh.get(h_key, {})
+                if "error" in datos_h:
+                    filas_comp.append({
+                        "Horizonte": cfg["label"],
+                        "Accuracy": "N/D",
+                        "F1-Score": "N/D",
+                        "Acierto Señales (%)": "N/D",
+                        "Rent. Media / Op (%)": "N/D",
+                        "Señales Activas": "0",
+                        "Estado": datos_h["error"]
+                    })
+                else:
+                    filas_comp.append({
+                        "Horizonte": cfg["label"],
+                        "Accuracy": f"{datos_h['accuracy']*100:.1f}%",
+                        "F1-Score": f"{datos_h['f1_score']*100:.1f}%",
+                        "Acierto Señales (%)": f"{datos_h['hit_rate']:.1f}%",
+                        "Rent. Media / Op (%)": f"{datos_h['rent_media']:+.2f}%",
+                        "Señales Activas": str(datos_h['num_senales']),
+                        "Estado": "OK"
+                    })
+            
+            st.dataframe(pd.DataFrame(filas_comp), use_container_width=True)
 
-            with c_l2:
-                st.subheader("🔮 Predicción ML (Último Día Registro)")
-                st.markdown(f"**Dirección Predicha:** `{res_mod['latest_pred']}`")
-                st.markdown(f"**Confianza Estimada:** `{res_mod['confianza_ml']:.1f}%`")
+            # 2. FEATURE IMPORTANCE COMPARATIVO POR HORIZONTE
+            st.subheader("🧠 ¿Qué está aprendiendo MARKET AI en cada Horizonte?")
+            col_f1, col_f2, col_f3, col_f4 = st.columns(4)
+            
+            cols_layout = [col_f1, col_f2, col_f3, col_f4]
+            for idx, (h_key, cfg) in enumerate(HORIZONTES_CONFIG.items()):
+                with cols_layout[idx]:
+                    st.markdown(f"**{cfg['label']}**")
+                    datos_h = res_mh.get(h_key, {})
+                    if "error" in datos_h:
+                        st.caption("N/D — Sin datos")
+                    else:
+                        top_fi = datos_h["feature_importance"].head(5)
+                        st.dataframe(top_fi, use_container_width=True)
+
+# 3. SECCIÓN DE PREDICCIÓN ACTUAL MULTIHORIZONTE
+st.subheader("🔮 PREDICCIÓN MULTIHORIZONTE (ACTUAL)")
+
+if st.button("🔍 PREDECIR MULTIHORIZONTE AHORA", use_container_width=True, key="btn_pred_multihorizonte"):
+    preds_mh, err_p = predecir_multihorizonte_actual(ticker=ticker_mh, es_metal=es_metal_mh)
+    
+    if preds_mh is None:
+        st.warning(f"⚠️ {err_p}")
+    else:
+        p_cols = st.columns(4)
+        for idx, (h_key, cfg) in enumerate(HORIZONTES_CONFIG.items()):
+            with p_cols[idx]:
+                st.markdown(f"### {h_key}")
+                p_data = preds_mh.get(h_key, {})
                 
-                # Barras de probabilidad por clase
-                for cls, prob in res_mod["proba_map"].items():
-                    st.progress(float(prob), text=f"Probabilidad {cls}: {prob*100:.1f}%")
-
-            # Comparativa de Estrategias
-            st.subheader("📈 Comparativa de Rentabilidad Acumulada sobre Test Set")
-            df_comp_est = pd.DataFrame({
-                "Estrategia": ["Machine Learning (RF)", "Algoritmo MARKET AI Actual", "Buy & Hold"],
-                "Retorno Acumulado Periodo Test (%)": [
-                    f"{res_mod['comp_ret_ml']:+.2f}%",
-                    f"{res_mod['comp_ret_actual']:+.2f}%",
-                    f"{res_mod['comp_ret_bh']:+.2f}%"
-                ]
-            })
-            st.dataframe(df_comp_est, use_container_width=True)
-
-            # Feature Importance
-            st.subheader("🧠 ¿Qué está aprendiendo MARKET AI?")
-            st.dataframe(res_mod["feature_importance"], use_container_width=True)
+                if "error" in p_data:
+                    st.info(p_data["error"])
+                else:
+                    dir_val = p_data["direccion"]
+                    conf_val = p_data["confianza"]
+                    
+                    if dir_val == "BULLISH":
+                        st.success(f"🟢 **{dir_val}** ({conf_val:.1f}%)")
+                    elif dir_val == "BEARISH":
+                        st.error(f"🔴 **{dir_val}** ({conf_val:.1f}%)")
+                    else:
+                        st.warning(f"🟡 **{dir_val}** ({conf_val:.1f}%)")
+                        
+                    # Desglose de Probabilidades
+                    for cls_name, p_val in p_data["proba_map"].items():
+                        st.caption(f"{cls_name}: {p_val*100:.1f}%")
