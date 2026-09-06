@@ -8,6 +8,71 @@ from datetime import datetime, timedelta
 import requests
 import os
 import re
+from prediction_history import (
+    evaluar_predicciones_pendientes,
+    generar_estadisticas_aprendizaje,
+    _cargar_predicciones
+)
+
+# Ejecutar comprobación no bloqueante de predicciones pendientes
+evaluar_predicciones_pendientes()
+
+st.markdown("---")
+st.subheader("🧠 APRENDIZAJE DE MARKET AI")
+
+stats = generar_estadisticas_aprendizaje()
+
+c_tot, c_eval, c_hy, c_peso = st.columns(4)
+
+with c_tot:
+    st.metric("Predicciones Registradas", stats["total_registrados"])
+
+with c_eval:
+    st.metric("Predicciones Evaluadas", stats["total_evaluados"])
+
+with c_hy:
+    val_hy = f"{stats.get('pct_global_hybrid', '0.0')}%" if stats["suficientes_datos"] else "N/D"
+    st.metric("Tasa Acierto HÍBRIDO", val_hy)
+
+with c_peso:
+    val_p = f"MAI {stats.get('mejor_combinacion_pesos', '60/40')}" if stats["suficientes_datos"] else "60/40 (Default)"
+    st.metric("Mejor Peso Validado", val_p)
+
+# Desglose por modelo y horizonte
+if stats["suficientes_datos"]:
+    st.markdown("#### Performance Comparativa por Modelo")
+    
+    col_m1, col_m2, col_m3 = st.columns(3)
+    col_m1.metric("Acierto MARKET AI", f"{stats['pct_global_mai']}%")
+    col_m2.metric("Acierto Machine Learning", f"{stats['pct_global_ml']}%")
+    col_m3.metric("Acierto Sistema Híbrido", f"{stats['pct_global_hybrid']}%")
+
+    st.markdown("#### Análisis Desglosado por Horizonte")
+    cols_hz = st.columns(4)
+    for idx, hk in enumerate(["5D", "20D", "60D", "120D"]):
+        datos_hz = stats["por_horizonte"].get(hk)
+        with cols_hz[idx]:
+            st.markdown(f"**Horizonte {hk}**")
+            if datos_hz:
+                st.write(f"• Evaluadas: {datos_hz['total']}")
+                st.write(f"• Híbrido: **{datos_hz['pct_hybrid']}%**")
+                st.write(f"• ML: {datos_hz['pct_ml']}%")
+                st.write(f"• Error Medio: {datos_hz['error_medio_pct']}%")
+            else:
+                st.caption("N/D — Sin predicciones evaluadas.")
+else:
+    st.info("ℹ️ N/D — Todavía no hay suficientes predicciones que hayan cumplido su horizonte para generar estadísticas avanzadas.")
+
+# Tabla del historial de predicciones
+st.markdown("#### Historial Reciente de Predicciones")
+raw_hist = _cargar_predicciones()
+if raw_hist:
+    df_ph = pd.DataFrame(raw_hist)
+    cols_mostrar = ["fecha_hora", "ticker", "horizonte", "dir_mai", "dir_ml", "dir_hybrid", "precio_inicial", "precio_final", "variacion_pct", "estado"]
+    df_ph = df_ph[[c for c in cols_mostrar if c in df_ph.columns]].sort_values(by="fecha_hora", ascending=False)
+    st.dataframe(df_ph, use_container_width=True)
+else:
+    st.caption("No existen registros de predicciones en el historial.")
 import time
 # Importar la función del prediction engine desde tu archivo externo
 try:
