@@ -2166,3 +2166,87 @@ if st.button("⚙️ GENERAR DATASET ML", use_container_width=True, key="btn_run
                 use_container_width=True,
                 key="btn_download_ml_csv"
             )
+
+# ==========================================
+# SECCIÓN: MARKET AI MACHINE LEARNING
+# ==========================================
+from ml_model import entrenar_modelo_ml
+
+st.divider()
+st.header("🤖 MARKET AI MACHINE LEARNING")
+st.caption("Primer Modelo Evaluado de Forma Independiente (Random Forest Classifier)")
+
+col_m1, col_m2, col_m3 = st.columns(3)
+
+with col_m1:
+    tipo_activo_ml_mod = st.radio("Mercado", ["📈 Acciones", "🥇 Metales/Futuros"], horizontal=True, key="rad_ml_mod_market")
+
+with col_m2:
+    if tipo_activo_ml_mod == "📈 Acciones":
+        ticker_ml_mod = st.text_input("Ticker Modelo", value="AAPL", key="txt_ml_mod_ticker").upper()
+        es_metal_ml_mod = False
+    else:
+        ticker_ml_mod = st.selectbox("Metal / Futuro", ["GC=F", "SI=F", "HG=F", "CL=F"], key="sb_ml_mod_metal")
+        es_metal_ml_mod = True
+
+with col_m3:
+    periodo_ml_mod = st.selectbox("Periodo Entrenamiento", ["2y", "5y", "max"], index=1, key="sb_ml_mod_period")
+
+if st.button("🔄 ENTRENAR MODELO ML", use_container_width=True, key="btn_train_ml_model"):
+    with st.spinner("Entrenando RandomForest, dividiendo 70/30 e imputando datos de forma segura..."):
+        res_mod, err_mod = entrenar_modelo_ml(
+            ticker=ticker_ml_mod,
+            periodo=periodo_ml_mod,
+            es_metal=es_metal_ml_mod
+        )
+        
+        if res_mod is None:
+            st.warning(f"⚠️ {err_mod}")
+        else:
+            st.success("✅ Modelo entrenado y guardado correctamente en `models/market_ai_model.pkl`.")
+
+            # Muestras y Métricas Generales
+            st.subheader("📊 Resumen del Entrenamiento y Evaluación (OOS)")
+            c_m1, c_m2, c_m3, c_m4, c_m5 = st.columns(5)
+            c_m1.metric("Modelo", "RandomForest")
+            c_m2.metric("Train Samples (70%)", res_mod["train_samples"])
+            c_m3.metric("Test Samples (30%)", res_mod["test_samples"])
+            c_m4.metric("Accuracy Test", f"{res_mod['accuracy']*100:.1f}%")
+            c_m5.metric("F1-Score Test", f"{res_mod['f1_score']*100:.1f}%")
+
+            # Matriz de Confusión y Probabilidades
+            c_l1, c_l2 = st.columns(2)
+            
+            with c_l1:
+                st.subheader("🧩 Matriz de Confusión (Test Set)")
+                df_cm = pd.DataFrame(
+                    res_mod["confusion_matrix"], 
+                    index=[f"Real: {c}" for c in res_mod["classes"]],
+                    columns=[f"Pred: {c}" for c in res_mod["classes"]]
+                )
+                st.dataframe(df_cm, use_container_width=True)
+
+            with c_l2:
+                st.subheader("🔮 Predicción ML (Último Día Registro)")
+                st.markdown(f"**Dirección Predicha:** `{res_mod['latest_pred']}`")
+                st.markdown(f"**Confianza Estimada:** `{res_mod['confianza_ml']:.1f}%`")
+                
+                # Barras de probabilidad por clase
+                for cls, prob in res_mod["proba_map"].items():
+                    st.progress(float(prob), text=f"Probabilidad {cls}: {prob*100:.1f}%")
+
+            # Comparativa de Estrategias
+            st.subheader("📈 Comparativa de Rentabilidad Acumulada sobre Test Set")
+            df_comp_est = pd.DataFrame({
+                "Estrategia": ["Machine Learning (RF)", "Algoritmo MARKET AI Actual", "Buy & Hold"],
+                "Retorno Acumulado Periodo Test (%)": [
+                    f"{res_mod['comp_ret_ml']:+.2f}%",
+                    f"{res_mod['comp_ret_actual']:+.2f}%",
+                    f"{res_mod['comp_ret_bh']:+.2f}%"
+                ]
+            })
+            st.dataframe(df_comp_est, use_container_width=True)
+
+            # Feature Importance
+            st.subheader("🧠 ¿Qué está aprendiendo MARKET AI?")
+            st.dataframe(res_mod["feature_importance"], use_container_width=True)
