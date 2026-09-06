@@ -8,109 +8,46 @@ from datetime import datetime, timedelta
 import requests
 import os
 import re
-from signals_engine import (
-    generar_senal_multimetrica,
-    evaluar_confirmacion_ml,
-    procesar_alertas_y_guardar,
-    _cargar_historial_senales
-)
-
-# Renderizado del módulo de señales en la aplicación
-st.markdown("---")
-st.subheader("🚨 SEÑAL Y ALERTAS MARKET AI")
-
-# Filtros de configuración de alertas
-with st.expander("⚙️ Configuración Personalizada de Alertas"):
-    c_a1, c_a2, c_a3 = st.columns(3)
-    al_cambio = c_a1.checkbox("Alertas de cambio de señal", value=True)
-    al_deterioro = c_a2.checkbox("Alertas de deterioro de score", value=True)
-    al_ml = c_a3.checkbox("Alertas de predicción ML", value=True)
-
-# Supongamos que las variables de la acción ya han sido calculadas por la app
-# score_mai, pred_hibridas_dict, dcf_val, target_analistas, precio_actual, rsi_val, beta_val
-
-dict_s = generar_senal_multimetrica(
-    score_mai=score_mai,
-    pred_hibridas=pred_hibridas_dict,
-    dcf_val=dcf_val,
-    precio_actual=precio_actual,
-    rsi=rsi_val,
-    beta=beta_val
-)
-
-# Procesar y registrar alertas
-alertas = procesar_alertas_y_guardar(
-    ticker=ticker_hy,
-    precio_actual=precio_actual,
-    score_mai=score_mai,
-    pred_hibridas=pred_hibridas_dict,
-    dcf_val=dcf_val,
-    target_analistas=target_analistas,
-    dict_senal=dict_s
-)
-
-# Mostrar Alertas Activas en Pantalla
-for al in alertas:
-    if "CAMBIO" in al["tipo"] and al_cambio:
-        st.error(f"**{al['tipo']}**: {al['mensaje']}")
-    elif "DETERIORO" in al["tipo"] and al_deterioro:
-        st.warning(f"**{al['tipo']}**: {al['mensaje']}")
-    elif "ML" in al["tipo"] and al_ml:
-        st.info(f"**{al['tipo']}**: {al['mensaje']}")
-
-# Panel Destacado de Señal Principal
-col_sig1, col_sig2 = st.columns([1, 1])
-
-with col_sig1:
-    st.markdown(f"### {dict_s['tipo_senal']}")
-    st.metric("Confianza de la Señal", f"{dict_s['confianza']}%")
-    st.write(f"**Precio Actual:** ${precio_actual:.2f}")
-    st.write(f"**Fair Value DCF:** ${dcf_val:.2f}" if dcf_val else "**Fair Value DCF:** N/D")
-    st.write(f"**Objetivo Analistas:** ${target_analistas:.2f}" if target_analistas else "**Objetivo Analistas:** N/D")
-
-with col_sig2:
-    st.markdown("#### ¿Por qué?")
-    for m in dict_s["motivos"]:
-        st.write(f"• {m}")
-
-# Matriz de Confirmación ML por Horizonte
-st.markdown("#### 🤖 Confirmación ML por Horizonte")
-cols_hz = st.columns(4)
-
-for idx, hk in enumerate(["5D", "20D", "60D", "120D"]):
-    ph = pred_hibridas_dict.get(hk, {})
-    conf_estado, conf_detalle = evaluar_confirmacion_ml(ph)
-    with cols_hz[idx]:
-        st.markdown(f"**{hk}**")
-        if "🟢" in conf_estado:
-            st.success(f"{conf_estado}\n\n{conf_detalle}")
-        elif "🔴" in conf_estado:
-            st.error(f"{conf_estado}\n\n{conf_detalle}")
-        else:
-            st.warning(f"{conf_estado}\n\n{conf_detalle}")
-
-# Historial de Señales Emitidas
-with st.expander("📜 Ver Historial de Señales Registradas"):
-    hist_senales = _cargar_historial_senales()
-    if hist_senales:
-        df_sh = pd.DataFrame(hist_senales).sort_values(by="fecha", ascending=False)
-        st.dataframe(df_sh, use_container_width=True)
-    else:
-        st.caption("No hay señales registradas en el historial.")
+import time
+# 1. IMPORTACIONES DE TUS MÓDULOS
 from prediction_history import (
     evaluar_predicciones_pendientes,
     generar_estadisticas_aprendizaje,
     _cargar_predicciones
 )
 
-# Ejecutar comprobación no bloqueante de predicciones pendientes
+try:
+    from prediction_engine import ejecutar_prediction_engine
+except ImportError:
+    # Función de respaldo si el archivo prediction_engine.py no está presente
+    def ejecutar_prediction_engine(*args, **kwargs):
+        return {
+            "direccion": "🟡 NEUTRAL",
+            "confianza": 50,
+            "datos_utilizados_pct": 100,
+            "score_predictivo": 0.0,
+            "probabilidades": {"alcista": 33, "base": 34, "bajista": 33},
+            "objetivos": None,
+            "horizontes": {"Corto Plazo": "Neutral", "Medio Plazo": "Neutral"},
+            "escenario_dominante": "Base",
+            "razon_dominante": "Sin datos predictivos suficientes.",
+            "senales_pos": [],
+            "senales_neg": []
+        }
+
+
+# 2. EJECUCIÓN DE COMPROBACIONES AUTOMÁTICAS (NO BLOQUEANTE)
 evaluar_predicciones_pendientes()
 
+
+# 3. SECCIÓN DE INTERFAZ: APRENDIZAJE DE MARKET AI
 st.markdown("---")
 st.subheader("🧠 APRENDIZAJE DE MARKET AI")
 
+# Obtener estadísticas de predicciones evaluadas
 stats = generar_estadisticas_aprendizaje()
 
+# Tarjetas / Métricas Principales
 c_tot, c_eval, c_hy, c_peso = st.columns(4)
 
 with c_tot:
@@ -127,7 +64,7 @@ with c_peso:
     val_p = f"MAI {stats.get('mejor_combinacion_pesos', '60/40')}" if stats["suficientes_datos"] else "60/40 (Default)"
     st.metric("Mejor Peso Validado", val_p)
 
-# Desglose por modelo y horizonte
+# Desglose comparativo por modelo y por horizonte
 if stats["suficientes_datos"]:
     st.markdown("#### Performance Comparativa por Modelo")
     
@@ -152,36 +89,21 @@ if stats["suficientes_datos"]:
 else:
     st.info("ℹ️ N/D — Todavía no hay suficientes predicciones que hayan cumplido su horizonte para generar estadísticas avanzadas.")
 
-# Tabla del historial de predicciones
+# Tabla interactiva con el historial reciente de predicciones
 st.markdown("#### Historial Reciente de Predicciones")
 raw_hist = _cargar_predicciones()
+
 if raw_hist:
     df_ph = pd.DataFrame(raw_hist)
-    cols_mostrar = ["fecha_hora", "ticker", "horizonte", "dir_mai", "dir_ml", "dir_hybrid", "precio_inicial", "precio_final", "variacion_pct", "estado"]
+    cols_mostrar = [
+        "fecha_hora", "ticker", "horizonte", "dir_mai", 
+        "dir_ml", "dir_hybrid", "precio_inicial", 
+        "precio_final", "variacion_pct", "estado"
+    ]
     df_ph = df_ph[[c for c in cols_mostrar if c in df_ph.columns]].sort_values(by="fecha_hora", ascending=False)
     st.dataframe(df_ph, use_container_width=True)
 else:
     st.caption("No existen registros de predicciones en el historial.")
-import time
-# Importar la función del prediction engine desde tu archivo externo
-try:
-    from prediction_engine import ejecutar_prediction_engine
-except ImportError:
-    # Función de respaldo si el archivo prediction_engine.py no está presente
-    def ejecutar_prediction_engine(*args, **kwargs):
-        return {
-            "direccion": "🟡 NEUTRAL",
-            "confianza": 50,
-            "datos_utilizados_pct": 100,
-            "score_predictivo": 0.0,
-            "probabilidades": {"alcista": 33, "base": 34, "bajista": 33},
-            "objetivos": None,
-            "horizontes": {"Corto Plazo": "Neutral", "Medio Plazo": "Neutral"},
-            "escenario_dominante": "Base",
-            "razon_dominante": "Sin datos predictivos suficientes.",
-            "senales_pos": [],
-            "senales_neg": []
-        }
 from backtesting_engine import ejecutar_backtest_engine
 import json
 from ml_retraining import (
