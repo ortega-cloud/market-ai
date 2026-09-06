@@ -4,124 +4,140 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
-from ml_dataset_engine import generar_ml_dataset
+from ml_dataset_engine import generar_ml_dataset, clasificar_target
 
 MODEL_DIR = "models"
-MODEL_FILE = os.path.join(MODEL_DIR, "market_ai_model.pkl")
+
+HORIZONTES_CONFIG = {
+    "5D": {
+        "target_ret_col": "Target_Ret_1D_5D",
+        "model_file": os.path.join(MODEL_DIR, "market_ai_5d.pkl"),
+        "label": "5 Días (Corto Plazo)"
+    },
+    "20D": {
+        "target_ret_col": "Target_Ret_1W_4W",
+        "model_file": os.path.join(MODEL_DIR, "market_ai_20d.pkl"),
+        "label": "20 Días (Medio Plazo - 1 Mes)"
+    },
+    "60D": {
+        "target_ret_col": "Target_Ret_1M_3M",
+        "model_file": os.path.join(MODEL_DIR, "market_ai_60d.pkl"),
+        "label": "60 Días (Medio-Largo Plazo - 3 Meses)"
+    },
+    "120D": {
+        "target_ret_col": "Target_Ret_3M_6M",
+        "model_file": os.path.join(MODEL_DIR, "market_ai_120d.pkl"),
+        "label": "120 Días (Largo Plazo - 6 Meses)"
+    }
+}
 
 
-def entrenar_modelo_ml(ticker="AAPL", periodo="5y", es_metal=False):
+def entrenar_modelo_horizonte(df_ml, target_col, model_path):
     """
-    Entrena un modelo RandomForestClassifier con división temporal (70% Train, 30% Test),
-    imputación segura y exportación a disco local.
+    Entrena un RandomForestClassifier para un horizonte específico usando
+    división temporal 70% Train / 30% Test e imputación segura.
     """
-    df_ml, err = generar_ml_dataset(ticker=ticker, periodo=periodo, es_metal=es_metal)
+    df_h = df_ml.copy()
     
-    if df_ml is None or df_ml.empty:
-        return None, f"No se pudo cargar el dataset para entrenar: {err or ''}"
-
-    df_ml = df_ml.dropna(subset=["Target_Class_1W_4W"]).copy()
+    # Crear la etiqueta categórica explícita si no existe en el dataset
+    df_h["Target_Class"] = df_h[target_col].apply(clasificar_target)
+    df_h = df_h.dropna(subset=["Target_Class"]).copy()
     
-    if len(df_ml) < 60:
-        return None, f"Insuficientes muestras con Target etiquetado (mínimo 60, disponibles: {len(df_ml)})."
+    if len(df_h) < 60:
+        return None, f"Datos insuficientes para entrenar este horizonte ({len(df_h)} muestras válidas, mínimo 60)."
 
     cols_excluir = [
-        "Fecha", "Ticker", "Mercado", 
-        "Target_Ret_1D_5D", "Target_Ret_1W_4W", "Target_Ret_1M_3M", "Target_Ret_3M_6M", 
-        "Target_Class_1W_4W"
+        "Fecha", "Ticker", "Mercado", "Direccion_Senal", "Confianza",
+        "Target_Ret_1D_5D", "Target_Ret_1W_4W", "Target_Ret_1M_3M", "Target_Ret_3M_6M",
+        "Target_Class_1W_4W", "Target_Class"
     ]
     
-    candidates_features = [c for c in df_ml.columns if c not in cols_excluir]
+    candidates = [c for c in df_h.columns if c not in cols_excluir]
+    valid_features = [c for c in candidates if df_h[c].dropna().nunique() > 1]
     
-    # 1. Filtro de features válidas (se descartan las totalmente vacías o con varianza 0)
-    valid_features = []
-    for c in candidates_features:
-        if df_ml[c].dropna().nunique() > 1:
-            valid_features.append(c)
-            
     if not valid_features:
-        return None, "No hay suficiente variabilidad en las features para entrenar un modelo."
+        return None, "Sin features válidas con suficiente variabilidad."
 
-    # 2. Imputación segura por mediana histórica (evitando look-ahead bias)
-    X = df_ml[valid_features].copy()
-    y = df_ml["Target_Class_1W_4W"].copy()
+    X = df_h[valid_features].copy()
+    y = df_h["Target_Class"].copy()
 
-    # Imputación por mediana de la feature
+    # Imputación segura por mediana (evita look-ahead bias)
     X = X.fillna(X.median(numeric_only=True)).fillna(0)
 
-    # 3. División Temporal Estricta Cronológica (70% Train, 30% Test)
-    split_idx = int(len(df_ml) * 0.70)
+    # División Temporal Estricta (70% Train / 30% Test)
+    split_idx = int(len(df_h) * 0.70)
     
     X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
     y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
 
     if len(X_train) == 0 or len(X_test) == 0:
-        return None, "Error en la división temporal de Train/Test."
+        return None, "Error en la división temporal de muestras."
 
-    # 4. Entrenamiento del modelo RandomForest
+    # Entrenar RandomForest
     clf = RandomForestClassifier(
-        n_estimators=100, 
-        max_depth=6, 
-        random_state=42, 
+        n_estimators=100,
+        max_depth=6,
+        random_state=42,
         class_weight="balanced"
     )
     clf.fit(X_train, y_train)
 
-    # 5. Evaluación de Desempeño
-    y_pred_test = clf.predict(X_test)
-    y_proba_test = clf.predict_proba(X_test)
+    # Evaluación en Muestra TEST (Out-of-Sample)
+    y_pred = clf.predict(X_test)
     
-    labels = np.unique(np.concatenate([y_train, y_test]))
+    acc = float(accuracy_score(y_test, y_pred))
+    prec = float(precision_score(y_test, y_pred, average="weighted", zero_division=0))
+    rec = float(recall_score(y_test, y_pred, average="weighted", zero_division=0))
+    f1 = float(f1_score(y_test, y_pred, average="weighted", zero_division=0))
     
-    acc = float(accuracy_score(y_test, y_pred_test))
-    prec = float(precision_score(y_test, y_pred_test, average="weighted", zero_division=0))
-    rec = float(recall_score(y_test, y_pred_test, average="weighted", zero_division=0))
-    f1 = float(f1_score(y_test, y_pred_test, average="weighted", zero_division=0))
-    
-    cm = confusion_matrix(y_test, y_pred_test, labels=clf.classes_)
+    cm = confusion_matrix(y_test, y_pred, labels=clf.classes_)
 
-    # 6. Importancia de Variables (Feature Importance)
+    # Importancia de Variables
     fi_df = pd.DataFrame({
         "Feature": valid_features,
         "Importancia (%)": np.round(clf.feature_importances_ * 100.0, 2)
     }).sort_values(by="Importancia (%)", ascending=False).reset_index(drop=True)
 
-    # 7. Inferencia sobre el registro más reciente (Hoy)
-    x_latest = X.iloc[[-1]]
-    latest_pred = clf.predict(x_latest)[0]
-    latest_probas = clf.predict_proba(x_latest)[0]
+    # Comparación de Estrategias y Tasa de Acierto sobre TEST
+    df_test = df_h.iloc[split_idx:].copy()
+    df_test["ML_Pred"] = y_pred
     
-    proba_map = dict(zip(clf.classes_, latest_probas))
-    confianza_ml = float(np.max(latest_probas) * 100.0)
-
-    # 8. Comparativa de Estrategias sobre la muestra TEST
-    df_test_full = df_ml.iloc[split_idx:].copy()
-    df_test_full["ML_Pred"] = y_pred_test
+    rets = df_test[target_col].fillna(0)
+    signals = df_test["ML_Pred"].map({"BULLISH": 1, "NEUTRAL": 0, "BEARISH": -1}).fillna(0)
     
-    # Rentabilidad acumulada
-    rets = df_test_full["Target_Ret_1W_4W"].fillna(0)
+    # Rentabilidad acumulada y media por operación
+    rets_estrategia = rets * signals
+    rent_total = float(rets_estrategia.sum())
+    rent_media = float(rets_estrategia.mean()) if len(rets_estrategia) > 0 else 0.0
     
-    # Strategy ML
-    signal_ml = df_test_full["ML_Pred"].map({"BULLISH": 1, "NEUTRAL": 0, "BEARISH": -1}).fillna(0)
-    ret_ml = (rets * signal_ml).sum()
+    # Hit rate de las señales activas (Bullish/Bearish)
+    senales_activas = df_test[df_test["ML_Pred"].isin(["BULLISH", "BEARISH"])]
+    if len(senales_activas) > 0:
+        hits = sum(
+            (row["ML_Pred"] == "BULLISH" and row[target_col] > 0) or
+            (row["ML_Pred"] == "BEARISH" and row[target_col] < 0)
+            for _, row in senales_activas.iterrows()
+        )
+        hit_rate = (hits / len(senales_activas)) * 100.0
+    else:
+        hit_rate = 0.0
 
-    # Strategy Algoritmo Actual
-    signal_act = df_test_full["Direccion_Senal"].map({"BULLISH": 1, "NEUTRAL": 0, "BEARISH": -1}).fillna(0)
-    ret_act = (rets * signal_act).sum()
-
-    # Strategy Buy & Hold
-    ret_bh = rets.sum()
-
-    # 9. Guardar Artefacto Localmente (models/market_ai_model.pkl)
+    # Guardar Artefacto en Disco Local
     os.makedirs(MODEL_DIR, exist_ok=True)
     joblib.dump({
         "model": clf,
         "features": valid_features,
         "classes": clf.classes_
-    }, MODEL_FILE)
+    }, model_path)
 
-    res_summary = {
-        "ticker": ticker,
+    # Inferencia en el registro actual (último día)
+    x_latest = X.iloc[[-1]]
+    latest_pred = clf.predict(x_latest)[0]
+    latest_probas = clf.predict_proba(x_latest)[0]
+    proba_map = dict(zip(clf.classes_, latest_probas))
+    confianza = float(np.max(latest_probas) * 100.0)
+
+    return {
         "train_samples": len(X_train),
         "test_samples": len(X_test),
         "accuracy": acc,
@@ -132,45 +148,77 @@ def entrenar_modelo_ml(ticker="AAPL", periodo="5y", es_metal=False):
         "classes": clf.classes_,
         "feature_importance": fi_df,
         "latest_pred": latest_pred,
-        "confianza_ml": confianza_ml,
+        "confianza": confianza,
         "proba_map": proba_map,
-        "comp_ret_ml": ret_ml,
-        "comp_ret_actual": ret_act,
-        "comp_ret_bh": ret_bh,
+        "rent_total": rent_total,
+        "rent_media": rent_media,
+        "hit_rate": hit_rate,
+        "num_senales": len(senales_activas),
         "features_utilizadas": valid_features
-    }
-
-    return res_summary, None
+    }, None
 
 
-def predecir_ml_actual(ticker="AAPL", es_metal=False):
+def entrenar_modelos_multihorizonte(ticker="AAPL", periodo="5y", es_metal=False):
     """
-    Función de inferencia ligera que reutiliza el modelo guardado en pkl
-    para realizar predicciones con los datos actuales.
+    Genera el dataset e independientemente entrena y evalúa los modelos para
+    los horizontes: 5D, 20D, 60D y 120D.
     """
-    if not os.path.exists(MODEL_FILE):
-        return None, "No existe ningún modelo ML guardado. Entrena uno en la interfaz primero."
+    df_ml, err = generar_ml_dataset(ticker=ticker, periodo=periodo, es_metal=es_metal)
+    if df_ml is None or df_ml.empty:
+        return None, f"Error al generar el dataset base: {err or ''}"
 
-    try:
-        data = joblib.load(MODEL_FILE)
-        clf = data["model"]
-        features = data["features"]
-        
-        df_ml, err = generar_ml_dataset(ticker=ticker, periodo="1y", es_metal=es_metal)
-        if df_ml is None or df_ml.empty:
-            return None, f"No se obtuvieron datos para inferencia: {err or ''}"
+    resultados = {}
+    
+    for horiz_key, cfg in HORIZONTES_CONFIG.items():
+        res, err_h = entrenar_modelo_horizonte(
+            df_ml=df_ml,
+            target_col=cfg["target_ret_col"],
+            model_path=cfg["model_file"]
+        )
+        if res is None:
+            resultados[horiz_key] = {"error": err_h}
+        else:
+            resultados[horiz_key] = res
+            
+    return resultados, None
 
-        x_latest = df_ml[features].iloc[[-1]].fillna(0)
-        
-        pred = clf.predict(x_latest)[0]
-        probas = clf.predict_proba(x_latest)[0]
-        proba_map = dict(zip(clf.classes_, probas))
-        confianza = float(np.max(probas) * 100.0)
 
-        return {
-            "direccion": pred,
-            "confianza": confianza,
-            "proba_map": proba_map
-        }, None
-    except Exception as e:
-        return None, f"Error al cargar/ejecutar el modelo ML guardado: {str(e)}"
+def predecir_multihorizonte_actual(ticker="AAPL", es_metal=False):
+    """
+    Carga los modelos .pkl guardados en disco y genera una predicción
+    para los 4 horizontes con los datos actuales.
+    """
+    df_ml, err = generar_ml_dataset(ticker=ticker, periodo="1y", es_metal=es_metal)
+    if df_ml is None or df_ml.empty:
+        return None, f"No se obtuvieron datos actuales para predicción: {err or ''}"
+
+    predicciones = {}
+    
+    for horiz_key, cfg in HORIZONTES_CONFIG.items():
+        model_path = cfg["model_file"]
+        if not os.path.exists(model_path):
+            predicciones[horiz_key] = {"error": "N/D — Modelo no entrenado localmente"}
+            continue
+            
+        try:
+            data = joblib.load(model_path)
+            clf = data["model"]
+            features = data["features"]
+            
+            x_latest = df_ml[features].iloc[[-1]].fillna(0)
+            
+            pred = clf.predict(x_latest)[0]
+            probas = clf.predict_proba(x_latest)[0]
+            proba_map = dict(zip(clf.classes_, probas))
+            confianza = float(np.max(probas) * 100.0)
+            
+            predicciones[horiz_key] = {
+                "label": cfg["label"],
+                "direccion": pred,
+                "confianza": confianza,
+                "proba_map": proba_map
+            }
+        except Exception as e:
+            predicciones[horiz_key] = {"error": f"Error al inferir: {str(e)}"}
+            
+    return predicciones, None
