@@ -8,6 +8,95 @@ from datetime import datetime, timedelta
 import requests
 import os
 import re
+from signals_engine import (
+    generar_senal_multimetrica,
+    evaluar_confirmacion_ml,
+    procesar_alertas_y_guardar,
+    _cargar_historial_senales
+)
+
+# Renderizado del módulo de señales en la aplicación
+st.markdown("---")
+st.subheader("🚨 SEÑAL Y ALERTAS MARKET AI")
+
+# Filtros de configuración de alertas
+with st.expander("⚙️ Configuración Personalizada de Alertas"):
+    c_a1, c_a2, c_a3 = st.columns(3)
+    al_cambio = c_a1.checkbox("Alertas de cambio de señal", value=True)
+    al_deterioro = c_a2.checkbox("Alertas de deterioro de score", value=True)
+    al_ml = c_a3.checkbox("Alertas de predicción ML", value=True)
+
+# Supongamos que las variables de la acción ya han sido calculadas por la app
+# score_mai, pred_hibridas_dict, dcf_val, target_analistas, precio_actual, rsi_val, beta_val
+
+dict_s = generar_senal_multimetrica(
+    score_mai=score_mai,
+    pred_hibridas=pred_hibridas_dict,
+    dcf_val=dcf_val,
+    precio_actual=precio_actual,
+    rsi=rsi_val,
+    beta=beta_val
+)
+
+# Procesar y registrar alertas
+alertas = procesar_alertas_y_guardar(
+    ticker=ticker_hy,
+    precio_actual=precio_actual,
+    score_mai=score_mai,
+    pred_hibridas=pred_hibridas_dict,
+    dcf_val=dcf_val,
+    target_analistas=target_analistas,
+    dict_senal=dict_s
+)
+
+# Mostrar Alertas Activas en Pantalla
+for al in alertas:
+    if "CAMBIO" in al["tipo"] and al_cambio:
+        st.error(f"**{al['tipo']}**: {al['mensaje']}")
+    elif "DETERIORO" in al["tipo"] and al_deterioro:
+        st.warning(f"**{al['tipo']}**: {al['mensaje']}")
+    elif "ML" in al["tipo"] and al_ml:
+        st.info(f"**{al['tipo']}**: {al['mensaje']}")
+
+# Panel Destacado de Señal Principal
+col_sig1, col_sig2 = st.columns([1, 1])
+
+with col_sig1:
+    st.markdown(f"### {dict_s['tipo_senal']}")
+    st.metric("Confianza de la Señal", f"{dict_s['confianza']}%")
+    st.write(f"**Precio Actual:** ${precio_actual:.2f}")
+    st.write(f"**Fair Value DCF:** ${dcf_val:.2f}" if dcf_val else "**Fair Value DCF:** N/D")
+    st.write(f"**Objetivo Analistas:** ${target_analistas:.2f}" if target_analistas else "**Objetivo Analistas:** N/D")
+
+with col_sig2:
+    st.markdown("#### ¿Por qué?")
+    for m in dict_s["motivos"]:
+        st.write(f"• {m}")
+
+# Matriz de Confirmación ML por Horizonte
+st.markdown("#### 🤖 Confirmación ML por Horizonte")
+cols_hz = st.columns(4)
+
+for idx, hk in enumerate(["5D", "20D", "60D", "120D"]):
+    ph = pred_hibridas_dict.get(hk, {})
+    conf_estado, conf_detalle = evaluar_confirmacion_ml(ph)
+    with cols_hz[idx]:
+        st.markdown(f"**{hk}**")
+        if "🟢" in conf_estado:
+            st.success(f"{conf_estado}\n\n{conf_detalle}")
+        elif "🔴" in conf_estado:
+            st.error(f"{conf_estado}\n\n{conf_detalle}")
+        else:
+            st.warning(f"{conf_estado}\n\n{conf_detalle}")
+
+# Historial de Señales Emitidas
+with st.expander("📜 Ver Historial de Señales Registradas"):
+    hist_senales = _cargar_historial_senales()
+    if hist_senales:
+        df_sh = pd.DataFrame(hist_senales).sort_values(by="fecha", ascending=False)
+        st.dataframe(df_sh, use_container_width=True)
+    else:
+        st.caption("No hay señales registradas en el historial.")
 from prediction_history import (
     evaluar_predicciones_pendientes,
     generar_estadisticas_aprendizaje,
