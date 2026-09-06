@@ -8,78 +8,122 @@ from ml_dataset_engine import generar_ml_dataset, clasificar_target
 from ml_model import HORIZONTES_CONFIG, entrenar_modelo_horizonte
 
 
-def evaluar_estrategia_retornos(tuples_signal_ret):
+def score_a_probabilidades(score):
     """
-    Calcula el rendimiento, número de operaciones y hit rate dado un listado de (señal, retorno_real).
-    Señal puede ser: 'BULLISH', 'BEARISH', 'NEUTRAL' o 1, -1, 0.
+    Convierte el MARKET AI Score (0-100) en probabilidades (Bullish, Neutral, Bearish).
     """
-    if not tuples_signal_ret:
-        return {"rent_total": 0.0, "hit_rate": 0.0, "num_senales": 0}
+    score = max(0.0, min(100.0, float(score)))
+    
+    if score >= 60:
+        p_bullish = 0.5 + (score - 60) * (0.45 / 40.0)
+        p_bearish = (100 - score) * (0.2 / 40.0)
+        p_neutral = 1.0 - p_bullish - p_bearish
+    elif score <= 40:
+        p_bearish = 0.5 + (40 - score) * (0.45 / 40.0)
+        p_bullish = score * (0.2 / 40.0)
+        p_neutral = 1.0 - p_bullish - p_bearish
+    else:
+        p_neutral = 0.5 + (50 - abs(score - 50)) * (0.3 / 10.0)
+        p_bullish = (score / 100.0) * (1.0 - p_neutral)
+        p_bearish = 1.0 - p_neutral - p_bullish
 
-    rets = []
-    hits = 0
-    total_ops = 0
+    total = p_bullish + p_neutral + p_bearish
+    return {
+        "BULLISH": (p_bullish / total) * 100.0,
+        "NEUTRAL": (p_neutral / total) * 100.0,
+        "BEARISH": (p_bearish / total) * 100.0
+    }
 
-    for sig, ret in tuples_signal_ret:
-        if sig in ["BULLISH", 1]:
-            factor = 1.0
-        elif sig in ["BEARISH", -1]:
-            factor = -1.0
-        else:
-            factor = 0.0
 
-        if factor != 0.0:
-            total_ops += 1
-            ret_est = float(ret) * factor
-            rets.append(ret_est)
-            if ret_est > 0:
-                hits += 1
+def calcular_prediccion_hibrida(score_market_ai, ml_proba_map, peso_market_ai=0.60, peso_ml=0.40):
+    """
+    Combina las probabilidades derivadas del Score con las del ML mediante
+    ponderación lineal (60/40), detecta conflictos/acuerdos y calcula la confianza final.
+    """
+    if not ml_proba_map:
+        p_score = score_a_probabilidades(score_market_ai)
+        dir_s = max(p_score, key=p_score.get)
+        return {
+            "direccion_hibrida": dir_s,
+            "confianza_hibrida": round(p_score[dir_s], 1),
+            "score_hibrido": round(score_market_ai, 1),
+            "conflicto": False,
+            "mensaje_conflicto": None,
+            "probas_combinadas": p_score
+        }
 
-    rent_total = float(np.sum(rets)) if rets else 0.0
-    hit_rate = (hits / total_ops * 100.0) if total_ops > 0 else 0.0
+    p_score = score_a_probabilidades(score_market_ai)
+    p_ml = {cls: ml_proba_map.get(cls, 0.0) * 100.0 if ml_proba_map.get(cls, 0.0) <= 1.0 else ml_proba_map.get(cls, 0.0)
+            for cls in ["BULLISH", "NEUTRAL", "BEARISH"]}
+
+    p_hibrida = {}
+    for cls in ["BULLISH", "NEUTRAL", "BEARISH"]:
+        p_hibrida[cls] = (p_score[cls] * peso_market_ai) + (p_ml[cls] * peso_ml)
+
+    dir_score = max(p_score, key=p_score.get)
+    dir_ml = max(p_ml, key=p_ml.get)
+    dir_final = max(p_hibrida, key=p_hibrida.get)
+
+    confianza_base = p_hibrida[dir_final]
+
+    es_conflicto = (dir_score in ["BULLISH", "BEARISH"]) and (dir_ml in ["BULLISH", "BEARISH"]) and (dir_score != dir_ml)
+    es_acuerdo = (dir_score == dir_ml) and (dir_score in ["BULLISH", "BEARISH"])
+
+    mensaje_conflicto = None
+
+    if es_conflicto:
+        confianza_final = confianza_base * 0.75
+        mensaje_conflicto = "⚠️ CONFLICTO DE SEÑALES: El algoritmo técnico/fundamental y el modelo ML presentan señales opuestas."
+    elif es_acuerdo:
+        confianza_final = confianza_base * 1.15
+    else:
+        confianza_final = confianza_base
+
+    confianza_final = min(95.0, round(confianza_final, 1))
+    score_hibrido = (p_hibrida["BULLISH"] * 100.0 + p_hibrida["NEUTRAL"] * 50.0) / 100.0
 
     return {
-        "rent_total": rent_total,
-        "hit_rate": hit_rate,
-        "num_senales": total_ops
+        "direccion_hibrida": dir_final,
+        "confianza_hibrida": confianza_final,
+        "score_hibrido": round(score_hibrido, 1),
+        "conflicto": es_conflicto,
+        "mensaje_conflicto": mensaje_conflicto,
+        "probas_combinadas": {k: round(v, 1) for k, v in p_hibrida.items()},
+        "dir_score": dir_score,
+        "dir_ml": dir_ml
     }
 
 
 def evaluar_backtest_hibrido(ticker="AAPL", periodo="5y", es_metal=False):
     """
-    Ejecuta una evaluación comparativa entre Técnico, Sentimiento, ML y el Ensamble Market AI
-    para todos los horizontes configurados.
+    Ejecuta una evaluación sobre la muestra de VALIDACIÓN/TEST (30% Out-of-Sample)
+    comparando MARKET AI, ML, HYBRID y BUY & HOLD para todos los horizontes.
     """
     df_ml, err = generar_ml_dataset(ticker=ticker, periodo=periodo, es_metal=es_metal)
     if df_ml is None or df_ml.empty:
-        return None, f"Error al generar el dataset para el motor híbrido: {err or ''}"
+        return None, f"Error generando dataset para backtest: {err or ''}"
 
     resultados_comparativa = {}
 
     for h_key, cfg in HORIZONTES_CONFIG.items():
-        res_ml, err_h = entrenar_modelo_horizonte(
-            df_ml=df_ml,
-            target_col=cfg["target_ret_col"],
-            model_path=cfg["model_file"]
-        )
-
-        if res_ml is None:
-            resultados_comparativa[h_key] = {"error": err_h}
-            continue
-
-        # Reconstruir df_h con clases válidas para el test
+        target_col = cfg["target_ret_col"]
+        
         df_h = df_ml.copy()
-        df_h["Target_Class"] = df_h[cfg["target_ret_col"]].apply(clasificar_target)
+        df_h["Target_Class"] = df_h[target_col].apply(clasificar_target)
         df_h = df_h.dropna(subset=["Target_Class"]).copy()
+        
+        if len(df_h) < 60:
+            resultados_comparativa[h_key] = {"error": "Insuficientes muestras para validación"}
+            continue
 
         split_idx = int(len(df_h) * 0.70)
         df_test = df_h.iloc[split_idx:].copy()
 
-        if len(df_test) == 0:
-            resultados_comparativa[h_key] = {"error": "Sin datos suficientes para el conjunto de prueba de backtest."}
+        res_ml, err_m = entrenar_modelo_horizonte(df_ml, target_col, cfg["model_file"])
+        if res_ml is None:
+            resultados_comparativa[h_key] = {"error": err_m}
             continue
 
-        # Obtener el modelo entrenado
         clf = None
         if isinstance(res_ml.get("model"), RandomForestClassifier):
             clf = res_ml["model"]
@@ -90,58 +134,63 @@ def evaluar_backtest_hibrido(ticker="AAPL", periodo="5y", es_metal=False):
             clf = saved_data.get("model")
 
         if clf is None or not hasattr(clf, "predict"):
-            resultados_comparativa[h_key] = {"error": "Error: Objeto de modelo ML no disponible para inferencia."}
+            resultados_comparativa[h_key] = {"error": "Error: Modelo ML no disponible para inferencia."}
             continue
 
         features = res_ml.get("features_utilizadas", [])
         X_test = df_test[features].fillna(0)
-
-        # Predicciones ML
+        
         ml_preds = clf.predict(X_test)
+        ml_probas = clf.predict_proba(X_test)
 
-        # DICCIONARIO DE MÉTRICAS (AQUÍ SE DEFINE 'metrics' EXP LÍCITAMENTE)
+        # INICIALIZACIÓN EXPLÍCITA DE METRICS (EVITA EL NAMEERROR)
         metrics = {
-            "TECNICO": [],
-            "SENTIMIENTO": [],
+            "MARKET_AI": [],
             "ML": [],
-            "MARKET_AI": []
+            "HYBRID": [],
+            "BUY_HOLD": []
         }
 
-        # Bucle de acumulación sobre las muestras de prueba
         for idx in range(len(df_test)):
             row = df_test.iloc[idx]
-            ret_real = row.get(cfg["target_ret_col"], 0.0)
+            ret_real = row[target_col]
+            score_mai = row.get("Market_AI_Score", 50.0)
 
-            # Simulación / obtención de señales por capa
-            dir_tec = row.get("Signal_Tecnico", "NEUTRAL")
-            dir_sent = row.get("Signal_Sentimiento", "NEUTRAL")
-            dir_ml = ml_preds[idx] if idx < len(ml_preds) else "NEUTRAL"
+            dir_mai = "BULLISH" if score_mai >= 60 else ("BEARISH" if score_mai <= 40 else "NEUTRAL")
+            dir_ml = ml_preds[idx]
+            
+            proba_map_idx = dict(zip(clf.classes_, ml_probas[idx]))
+            res_hib = calcular_prediccion_hibrida(score_mai, proba_map_idx)
+            dir_hib = res_hib["direccion_hibrida"]
 
-            # Voto del ensamble (Market AI)
-            votos = [dir_tec, dir_sent, dir_ml]
-            bulls = votos.count("BULLISH")
-            bears = votos.count("BEARISH")
-
-            if bulls > bears:
-                dir_mai = "BULLISH"
-            elif bears > bulls:
-                dir_mai = "BEARISH"
-            else:
-                dir_mai = "NEUTRAL"
-
-            # Acumular tuplas para evaluación
-            metrics["TECNICO"].append((dir_tec, ret_real))
-            metrics["SENTIMIENTO"].append((dir_sent, ret_real))
-            metrics["ML"].append((dir_ml, ret_real))
             metrics["MARKET_AI"].append((dir_mai, ret_real))
+            metrics["ML"].append((dir_ml, ret_real))
+            metrics["HYBRID"].append((dir_hib, ret_real))
+            metrics["BUY_HOLD"].append(("BULLISH", ret_real))
 
-        # Calcular resultados consolidados por horizonte
-        resultados_comparativa[h_key] = {
-            "TECNICO": evaluar_estrategia_retornos(metrics["TECNICO"]),
-            "SENTIMIENTO": evaluar_estrategia_retornos(metrics["SENTIMIENTO"]),
-            "ML": evaluar_estrategia_retornos(metrics["ML"]),
-            "MARKET_AI": evaluar_estrategia_retornos(metrics["MARKET_AI"]),
-            "test_samples": len(df_test)
-        }
+        res_h = {}
+        for est_name, datos in metrics.items():
+            total_senales = len(datos)
+            senales_activas = [d for d in datos if d[0] in ["BULLISH", "BEARISH"]]
+            
+            if len(senales_activas) > 0:
+                hits = sum(1 for d, r in senales_activas if (d == "BULLISH" and r > 0) or (d == "BEARISH" and r < 0))
+                acierto = (hits / len(senales_activas)) * 100.0
+            else:
+                acierto = 0.0
+
+            rets_estrategia = [r if d == "BULLISH" else (-r if d == "BEARISH" else 0.0) for d, r in datos]
+            rent_acum = sum(rets_estrategia)
+            rent_media = np.mean(rets_estrategia) if rets_estrategia else 0.0
+
+            res_h[est_name] = {
+                "acierto": round(acierto, 1),
+                "rent_media": round(rent_media, 2),
+                "rent_acum": round(rent_acum, 2),
+                "senales_activas": len(senales_activas),
+                "total_evaluadas": total_senales
+            }
+
+        resultados_comparativa[h_key] = res_h
 
     return resultados_comparativa, None
