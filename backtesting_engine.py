@@ -1,6 +1,27 @@
 import numpy as np
 import pandas as pd
 import streamlit as st
+# Dentro del bucle de simulación día a día en backtesting_engine.py:
+from signals_engine import simular_senal_historica
+
+# ...
+for i in range(len(df_test)):
+    row = df_test.iloc[i]
+    score_t = df_test['SCORE_HISTORICO'].iloc[i] if 'SCORE_HISTORICO' in df_test else 50.0
+    
+    # Generar señal sin Look-Ahead Bias usando datos disponibles en fecha i
+    senal_i = simular_senal_historica(row, score_t)
+    
+    # Lógica de Ejecución en Backtesting:
+    if senal_i in ["COMPRA FUERTE", "COMPRA"] and posicion == 0:
+        posicion = 1
+        precio_entrada = row['Close']
+        operaciones.append({'tipo': 'COMPRA', 'fecha': row['Fecha'], 'precio': precio_entrada, 'tipo_senal': senal_i})
+    elif senal_i == "VENTA" and posicion == 1:
+        posicion = 0
+        precio_salida = row['Close']
+        ret = ((precio_salida - precio_entrada) / precio_entrada) * 100.0
+        operaciones.append({'tipo': 'VENTA', 'fecha': row['Fecha'], 'precio': precio_salida, 'retorno_pct': ret})
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def obtener_historico_cache(ticker, periodo="5y"):
