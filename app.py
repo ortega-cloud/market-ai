@@ -2095,3 +2095,74 @@ if st.button("🚀 EJECUTAR WALK-FORWARD VALIDATION", use_container_width=True, 
                 st.warning("🟡 **¿LA MEJORA ES CONSISTENTE?: DUDOSO.** La mejora no es uniforme entre periodos. Se recomienda mantener los pesos activos.")
             else:
                 st.error("🔴 **¿LA MEJORA ES CONSISTENTE?: NO (OVERFITTING DETECTADO).** El modelo optimizado empeora fuera de muestra.")
+
+# ==========================================
+# SECCIÓN: MACHINE LEARNING DATASET ENGINE
+# ==========================================
+from ml_dataset_engine import generar_ml_dataset
+
+st.divider()
+st.header("🤖 MACHINE LEARNING DATASET")
+st.caption("Generación de datasets históricos sin Look-Ahead Bias para entrenamiento futuro.")
+
+col_ml1, col_ml2, col_ml3 = st.columns(3)
+
+with col_ml1:
+    tipo_activo_ml = st.radio("Mercado ML", ["📈 Acciones", "🥇 Metales/Futuros"], horizontal=True, key="rad_ml_market_unique")
+
+with col_ml2:
+    if tipo_activo_ml == "📈 Acciones":
+        ticker_ml = st.text_input("Ticker ML", value="AAPL", key="txt_ml_ticker_unique").upper()
+        es_metal_ml = False
+    else:
+        ticker_ml = st.selectbox("Metal / Futuro ML", ["GC=F", "SI=F", "HG=F", "CL=F"], key="sb_ml_metal_unique")
+        es_metal_ml = True
+
+with col_ml3:
+    periodo_ml = st.selectbox("Periodo Histórico", ["2y", "5y", "max"], index=1, key="sb_ml_period_unique")
+
+if st.button("⚙️ GENERAR DATASET ML", use_container_width=True, key="btn_run_ml_dataset_unique"):
+    with st.spinner("Generando features y targets sin Look-Ahead Bias..."):
+        df_ml_res, err_ml = generar_ml_dataset(
+            ticker=ticker_ml,
+            periodo=periodo_ml,
+            es_metal=es_metal_ml
+        )
+        
+        if df_ml_res is None or df_ml_res.empty:
+            st.warning(f"⚠️ {err_ml}")
+        else:
+            total_registros = len(df_ml_res)
+            # Conteo de features excluyendo metadatos y targets
+            cols_metadata = ["Fecha", "Ticker", "Mercado", "Target_Ret_1D_5D", "Target_Ret_1W_4W", "Target_Ret_1M_3M", "Target_Ret_3M_6M", "Target_Class_1W_4W"]
+            num_features = len([c for c in df_ml_res.columns if c not in cols_metadata])
+            
+            # Cálculo del % global de datos faltantes (NaN)
+            total_celdas = df_ml_res.size
+            total_nans = df_ml_res.isna().sum().sum()
+            pct_nans = (total_nans / total_celdas) * 100.0 if total_celdas > 0 else 0.0
+
+            fecha_ini = df_ml_res["Fecha"].iloc[0]
+            fecha_fin = df_ml_res["Fecha"].iloc[-1]
+
+            # METRICAS DEL DATASET
+            m_col1, m_col2, m_col3, m_col4, m_col5 = st.columns(5)
+            m_col1.metric("Registros", total_registros)
+            m_col2.metric("Features", num_features)
+            m_col3.metric("Datos Faltantes", f"{pct_nans:.1f}%")
+            m_col4.metric("Fecha Inicial", fecha_ini)
+            m_col5.metric("Fecha Final", fecha_fin)
+
+            st.subheader("📋 Vista Previa del Dataset Histórico")
+            st.dataframe(df_ml_res.head(10), use_container_width=True)
+
+            # DESCARGA DEL DATASET
+            csv_data = df_ml_res.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 DESCARGAR DATASET EN CSV",
+                data=csv_data,
+                file_name=f"ML_Dataset_{ticker_ml}_{fecha_ini}_a_{fecha_fin}.csv",
+                mime="text/csv",
+                use_container_width=True,
+                key="btn_download_ml_csv"
+            )
