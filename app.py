@@ -29,6 +29,81 @@ except ImportError:
             "senales_neg": []
         }
 from backtesting_engine import ejecutar_backtest_engine
+import json
+from ml_retraining import (
+    comprobar_reentrenamiento_automatico,
+    ejecutar_reentrenamiento_completo,
+    METADATA_FILE,
+    HISTORY_FILE
+)
+
+# 1. Comprobación automática al iniciar la app (Background Check)
+if "reentrenamiento_comprobado" not in st.session_state:
+    ejecutado, msg, _ = comprobar_reentrenamiento_automatico(ticker=ticker_hy if 'ticker_hy' in locals() else "AAPL")
+    st.session_state["reentrenamiento_comprobado"] = True
+
+# 2. Interfaz en Streamlit
+st.markdown("---")
+st.subheader("🔄 ACTUALIZACIÓN DEL MACHINE LEARNING")
+
+# Cargar metadatos actuales
+metadata = {}
+if os.path.exists(METADATA_FILE):
+    with open(METADATA_FILE, "r", encoding="utf-8") as f:
+        metadata = json.load(f)
+
+col_info1, col_info2, col_info3 = st.columns(3)
+
+ult_ent = metadata.get("ultima_fecha_entrenamiento", "No registrado")
+datos_hasta = metadata.get("fecha_max_datos", "N/D")
+activos = metadata.get("modelos_activos", {"5D": "v001", "20D": "v001", "60D": "v001", "120D": "v001"})
+
+with col_info1:
+    st.metric("Último Entrenamiento", ult_ent.split(" ")[0] if " " in ult_ent else ult_ent)
+    st.caption(f"Hora: {ult_ent.split(' ')[1] if ' ' in ult_ent else ''}")
+
+with col_info2:
+    st.metric("Datos Utilizados Hasta", datos_hasta)
+    st.caption(f"Registros: {metadata.get('registros_totales', 'N/D')}")
+
+with col_info3:
+    st.metric("Modo Automático", "ACTIVADO ⚙️")
+    st.caption("Frecuencia: Semanal")
+
+# Estado de modelos por horizonte
+st.markdown("#### Estado de los Modelos Activos")
+cols_h = st.columns(4)
+horizontes_keys = ["5D", "20D", "60D", "120D"]
+
+for idx, hk in enumerate(horizontes_keys):
+    ver = activos.get(hk, "v001")
+    with cols_h[idx]:
+        st.success(f"**{hk}** → {ver} 🟢 ACTIVO")
+
+# Botón de reentrenamiento manual con protección de periodo
+col_btn1, col_btn2 = st.columns([1, 2])
+with col_btn1:
+    if st.button("🔄 Actualizar Machine Learning Ahora"):
+        with st.spinner("Ejecutando pipeline de reentrenamiento, validación y versionado..."):
+            ok, res_msg, _ = ejecutar_reentrenamiento_completo(
+                ticker=ticker_hy if 'ticker_hy' in locals() else "AAPL",
+                forzar=True
+            )
+            if ok:
+                st.success("Reentrenamiento completado exitosamente.")
+                st.info(res_msg)
+                st.rerun()
+            else:
+                st.warning(res_msg)
+
+# Historial de Entrenamientos (Tabla desplegable)
+if os.path.exists(HISTORY_FILE):
+    with st.expander("📜 Ver Historial Completo de Entrenamientos y Validaciones"):
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            hist_data = json.load(f)
+        if hist_data:
+            df_hist = pd.DataFrame(hist_data)
+            st.dataframe(df_hist, use_container_width=True)
 
 # ==========================================
 # SECCIÓN: MARKET AI BACKTESTING
