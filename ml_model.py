@@ -34,12 +34,10 @@ HORIZONTES_CONFIG = {
 
 def entrenar_modelo_horizonte(df_ml, target_col, model_path):
     """
-    Entrena un RandomForestClassifier para un horizonte específico usando
-    división temporal 70% Train / 30% Test e imputación segura.
+    Entrena un modelo RandomForest para un horizonte temporal específico.
+    Devuelve las métricas, la importancia de variables y la instancia del modelo.
     """
     df_h = df_ml.copy()
-    
-    # Crear la etiqueta categórica explícita si no existe en el dataset
     df_h["Target_Class"] = df_h[target_col].apply(clasificar_target)
     df_h = df_h.dropna(subset=["Target_Class"]).copy()
     
@@ -61,19 +59,16 @@ def entrenar_modelo_horizonte(df_ml, target_col, model_path):
     X = df_h[valid_features].copy()
     y = df_h["Target_Class"].copy()
 
-    # Imputación segura por mediana (evita look-ahead bias)
     X = X.fillna(X.median(numeric_only=True)).fillna(0)
 
-    # División Temporal Estricta (70% Train / 30% Test)
+    # División temporal (70% train, 30% test)
     split_idx = int(len(df_h) * 0.70)
-    
     X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
     y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
 
     if len(X_train) == 0 or len(X_test) == 0:
         return None, "Error en la división temporal de muestras."
 
-    # Entrenar RandomForest
     clf = RandomForestClassifier(
         n_estimators=100,
         max_depth=6,
@@ -82,9 +77,9 @@ def entrenar_modelo_horizonte(df_ml, target_col, model_path):
     )
     clf.fit(X_train, y_train)
 
-    # Evaluación en Muestra TEST (Out-of-Sample)
     y_pred = clf.predict(X_test)
     
+    # Métricas estadísticas
     acc = float(accuracy_score(y_test, y_pred))
     prec = float(precision_score(y_test, y_pred, average="weighted", zero_division=0))
     rec = float(recall_score(y_test, y_pred, average="weighted", zero_division=0))
@@ -92,25 +87,23 @@ def entrenar_modelo_horizonte(df_ml, target_col, model_path):
     
     cm = confusion_matrix(y_test, y_pred, labels=clf.classes_)
 
-    # Importancia de Variables
+    # Importancia de características
     fi_df = pd.DataFrame({
         "Feature": valid_features,
         "Importancia (%)": np.round(clf.feature_importances_ * 100.0, 2)
     }).sort_values(by="Importancia (%)", ascending=False).reset_index(drop=True)
 
-    # Comparación de Estrategias y Tasa de Acierto sobre TEST
+    # Backtest en conjunto de test
     df_test = df_h.iloc[split_idx:].copy()
     df_test["ML_Pred"] = y_pred
     
     rets = df_test[target_col].fillna(0)
     signals = df_test["ML_Pred"].map({"BULLISH": 1, "NEUTRAL": 0, "BEARISH": -1}).fillna(0)
     
-    # Rentabilidad acumulada y media por operación
     rets_estrategia = rets * signals
     rent_total = float(rets_estrategia.sum())
     rent_media = float(rets_estrategia.mean()) if len(rets_estrategia) > 0 else 0.0
     
-    # Hit rate de las señales activas (Bullish/Bearish)
     senales_activas = df_test[df_test["ML_Pred"].isin(["BULLISH", "BEARISH"])]
     if len(senales_activas) > 0:
         hits = sum(
@@ -122,7 +115,7 @@ def entrenar_modelo_horizonte(df_ml, target_col, model_path):
     else:
         hit_rate = 0.0
 
-   # Guardar Artefacto en Disco Local (.pkl)
+    # Guardar modelo en disco
     os.makedirs(MODEL_DIR, exist_ok=True)
     joblib.dump({
         "model": clf,
@@ -130,46 +123,16 @@ def entrenar_modelo_horizonte(df_ml, target_col, model_path):
         "classes": clf.classes_
     }, model_path)
 
-    # Inferencia en el registro actual
+    # Inferencia de la última fila disponible
     x_latest = X.iloc[[-1]]
     latest_pred = clf.predict(x_latest)[0]
     latest_probas = clf.predict_proba(x_latest)[0]
     proba_map = dict(zip(clf.classes_, latest_probas))
     confianza = float(np.max(latest_probas) * 100.0)
 
-    # DICCIONARIO DE RETORNO CON EL OBJETO ENTRENADO REAL (clf)
     return {
-        "model": clf,              # Instancia de RandomForestClassifier
-        "_model_obj": clf,         # Copia de seguridad explícita
-        "train_samples": len(X_train),
-        "test_samples": len(X_test),
-        "accuracy": acc,
-        "precision": prec,
-        "recall": rec,
-        "f1_score": f1,
-        "confusion_matrix": cm,
-        "classes": clf.classes_,
-        "feature_importance": fi_df,
-        "latest_pred": latest_pred,
-        "confianza": confianza,
-        "proba_map": proba_map,
-        "rent_total": rent_total,
-        "rent_media": rent_media,
-        "hit_rate": hit_rate,
-        "num_senales": len(senales_activas),
-        "features_utilizadas": valid_features
-    }, None
-
-    # Inferencia en el registro actual (último día)
-    x_latest = X.iloc[[-1]]
-    latest_pred = clf.predict(x_latest)[0]
-    latest_probas = clf.predict_proba(x_latest)[0]
-    proba_map = dict(zip(clf.classes_, latest_probas))
-    confianza = float(np.max(latest_probas) * 100.0)
-
-   return {
         "model": clf,
-        "_model_obj": clf,  # Servirá para compatibilidad directa con hybrid_engine.py
+        "_model_obj": clf,
         "train_samples": len(X_train),
         "test_samples": len(X_test),
         "accuracy": acc,
@@ -192,15 +155,13 @@ def entrenar_modelo_horizonte(df_ml, target_col, model_path):
 
 def entrenar_modelos_multihorizonte(ticker="AAPL", periodo="5y", es_metal=False):
     """
-    Genera el dataset e independientemente entrena y evalúa los modelos para
-    los horizontes: 5D, 20D, 60D y 120D.
+    Entrena los modelos para todos los horizontes configurados en HORIZONTES_CONFIG.
     """
     df_ml, err = generar_ml_dataset(ticker=ticker, periodo=periodo, es_metal=es_metal)
     if df_ml is None or df_ml.empty:
         return None, f"Error al generar el dataset base: {err or ''}"
 
     resultados = {}
-    
     for horiz_key, cfg in HORIZONTES_CONFIG.items():
         res, err_h = entrenar_modelo_horizonte(
             df_ml=df_ml,
@@ -217,15 +178,13 @@ def entrenar_modelos_multihorizonte(ticker="AAPL", periodo="5y", es_metal=False)
 
 def predecir_multihorizonte_actual(ticker="AAPL", es_metal=False):
     """
-    Carga los modelos .pkl guardados en disco y genera una predicción
-    para los 4 horizontes con los datos actuales.
+    Carga los modelos guardados y predice la dirección actual para cada horizonte.
     """
     df_ml, err = generar_ml_dataset(ticker=ticker, periodo="1y", es_metal=es_metal)
     if df_ml is None or df_ml.empty:
         return None, f"No se obtuvieron datos actuales para predicción: {err or ''}"
 
     predicciones = {}
-    
     for horiz_key, cfg in HORIZONTES_CONFIG.items():
         model_path = cfg["model_file"]
         if not os.path.exists(model_path):
