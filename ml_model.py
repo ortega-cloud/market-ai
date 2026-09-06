@@ -122,13 +122,43 @@ def entrenar_modelo_horizonte(df_ml, target_col, model_path):
     else:
         hit_rate = 0.0
 
-    # Guardar Artefacto en Disco Local
+   # Guardar Artefacto en Disco Local (.pkl)
     os.makedirs(MODEL_DIR, exist_ok=True)
     joblib.dump({
         "model": clf,
         "features": valid_features,
         "classes": clf.classes_
     }, model_path)
+
+    # Inferencia en el registro actual
+    x_latest = X.iloc[[-1]]
+    latest_pred = clf.predict(x_latest)[0]
+    latest_probas = clf.predict_proba(x_latest)[0]
+    proba_map = dict(zip(clf.classes_, latest_probas))
+    confianza = float(np.max(latest_probas) * 100.0)
+
+    # DICCIONARIO DE RETORNO CON EL OBJETO ENTRENADO REAL (clf)
+    return {
+        "model": clf,              # Instancia de RandomForestClassifier
+        "_model_obj": clf,         # Copia de seguridad explícita
+        "train_samples": len(X_train),
+        "test_samples": len(X_test),
+        "accuracy": acc,
+        "precision": prec,
+        "recall": rec,
+        "f1_score": f1,
+        "confusion_matrix": cm,
+        "classes": clf.classes_,
+        "feature_importance": fi_df,
+        "latest_pred": latest_pred,
+        "confianza": confianza,
+        "proba_map": proba_map,
+        "rent_total": rent_total,
+        "rent_media": rent_media,
+        "hit_rate": hit_rate,
+        "num_senales": len(senales_activas),
+        "features_utilizadas": valid_features
+    }, None
 
     # Inferencia en el registro actual (último día)
     x_latest = X.iloc[[-1]]
