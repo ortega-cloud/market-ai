@@ -9,6 +9,110 @@ import requests
 import os
 import re
 import time
+from monitor_engine import (
+    cargar_watchlist,
+    agregar_ticker_watchlist,
+    eliminar_ticker_watchlist,
+    ejecutar_monitorizacion_watchlist,
+    comparar_transiciones_top5
+)
+
+# --- VISTA DEL CENTRO DE ALERTAS Y MONITORIZACIÓN ---
+
+def render_seccion_monitorizacion():
+    st.header("⭐ MONITORIZACIÓN AUTOMÁTICA Y WATCHLIST")
+    st.caption("Vigilancia continua de activos favoritos con alertas inteligentes.")
+
+    # 1. GESTIÓN DE WATCHLIST
+    with st.expander("⚙️ Gestionar Mis Acciones (Watchlist)", expanded=False):
+        c1, c2 = st.columns([3, 1])
+        with c1:
+            nuevo_ticker = st.text_input("Añadir Ticker a la Watchlist", placeholder="Ej: AMD, META, TSLA").upper()
+        with c2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("➕ Añadir"):
+                if nuevo_ticker:
+                    exito, msg = agregar_ticker_watchlist(nuevo_ticker)
+                    if exito:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.warning(msg)
+
+        watchlist_actual = cargar_watchlist()
+        st.write("**Acciones actualmente en seguimiento:**")
+        cols = st.columns(len(watchlist_actual) if len(watchlist_actual) > 0 else 1)
+        for idx, t in enumerate(watchlist_actual):
+            if cols[idx % len(cols)].button(f"❌ {t}", key=f"del_{t}"):
+                eliminar_ticker_watchlist(t)
+                st.rerun()
+
+    # 2. CONTROLES Y UMBRALES
+    col_acc, col_umb = st.columns([1, 2])
+    with col_acc:
+        if st.button("🔄 ACTUALIZAR MONITOR"):
+            st.cache_data.clear()
+            st.rerun()
+
+    # 3. EJECUCIÓN DEL MONITOR
+    with st.spinner("Procesando la watchlist y analizando cambios..."):
+        res_monitor = ejecutar_monitorizacion_watchlist()
+
+    acciones = res_monitor["acciones"]
+    alertas = res_monitor["alertas"]
+
+    st.caption(f"📅 **Última actualización**: {res_monitor['fecha_actualizacion']} | **Acciones monitorizadas**: {len(acciones)}")
+
+    # 4. TARJETA TOP 5 CAMBIOS
+    cambios_top5 = comparar_transiciones_top5()
+    if cambios_top5:
+        st.subheader("🏆 TOP 5 CAMBIOS RECIENTES")
+        for c in cambios_top5:
+            st.markdown(c["texto"])
+        st.divider()
+
+    # 5. TABLA DE ESTADO DE CADA ACCIÓN
+    st.subheader("📊 ESTADO ACTUAL DE MIS ACCIONES")
+    if acciones:
+        df_acc = pd.DataFrame(acciones)
+        df_acc_show = df_acc[["ticker", "precio", "score_mai", "cambio_score", "fair_value_dcf", "potencial_dcf", "ml_pred", "hybrid", "senal"]].copy()
+        
+        # Ordenar por magnitud del cambio en el score
+        df_acc_show["abs_cambio"] = df_acc_show["cambio_score"].abs()
+        df_acc_show = df_acc_show.sort_values(by="abs_cambio", ascending=False).drop(columns=["abs_cambio"])
+        
+        df_acc_show.columns = ["Ticker", "Precio ($)", "Score", "Δ Score", "DCF ($)", "Pot. DCF (%)", "ML", "Hybrid", "Señal"]
+        st.dataframe(df_acc_show, use_container_width=True)
+
+    # 6. CENTRO DE ALERTAS
+    st.subheader("🚨 CENTRO DE ALERTAS")
+    if not alertas:
+        st.info("No se han detectado cambios significativos respecto al último análisis guardado.")
+    else:
+        p1, p2, p3 = st.tabs(["🟢 Positivas", "🟡 Neutrales", "🔴 Negativas"])
+        
+        with p1:
+            a_pos = [a for a in alertas if a["tipo"] == "POSITIVA"]
+            if not a_pos:
+                st.write("Sin alertas positivas recientes.")
+            for a in a_pos:
+                st.success(f"**{a['titulo']}**\n\n{a['explicacion']}\n\n*Motivo*: {a['motivo']}")
+
+        with p2:
+            a_neu = [a for a in alertas if a["tipo"] == "NEUTRAL"]
+            if not a_neu:
+                st.write("Sin alertas neutrales recientes.")
+            for a in a_neu:
+                st.warning(f"**{a['titulo']}**\n\n{a['explicacion']}\n\n*Motivo*: {a['motivo']}")
+
+        with p3:
+            a_neg = [a for a in alertas if a["tipo"] == "NEGATIVA"]
+            if not a_neg:
+                st.write("Sin alertas negativas recientes.")
+            for a in a_neg:
+                st.error(f"**{a['titulo']}**\n\n{a['explicacion']}\n\n*Motivo*: {a['motivo']}")
+
+render_seccion_monitorizacion()
 from ranking_engine import calcular_top_oportunidades, backtest_top5_walk_forward, UNIVERSO_SP500_DEFAULT
 
 # --- CACHÉ PARA EVITAR RETARDOS EXCESIVOS ---
