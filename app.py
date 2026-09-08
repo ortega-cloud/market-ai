@@ -9,6 +9,14 @@ import requests
 import os
 import re
 import time
+# Importación del módulo AI Analyst con manejo de excepciones si no estuviera instalado
+try:
+    from ai_analyst import generar_analisis_ai
+except ImportError:
+    try:
+        from ai_analyst import analizar_empresa as generar_analisis_ai
+    except ImportError:
+        generar_analisis_ai = None
 from monitor_engine import (
     cargar_watchlist,
     agregar_ticker_watchlist,
@@ -2216,6 +2224,130 @@ if ticker_input:
 
     else:
         st.error("No se pudo cargar la información para el ticker introducido. Verifica el símbolo.")
+
+# ==============================================================================
+# INTEGRACIÓN AI ANALYST - SECCIÓN 🧠 ANÁLISIS MARKET AI
+# ==============================================================================
+
+if generar_analisis_ai is not None:
+    try:
+        # 1. Recopilación dinámica de variables con fallback safe (None o N/D)
+        datos_ai = {
+            "ticker": ticker if 'ticker' in locals() else None,
+            "nombre": info.get('longName') if 'info' in locals() and isinstance(info, dict) else "N/D",
+            "precio": precio if 'precio' in locals() else (precio_analisis if 'precio_analisis' in locals() else None),
+            "variacion": variacion if 'variacion' in locals() else None,
+            "ma20": ma20 if 'ma20' in locals() else None,
+            "ma50": ma50 if 'ma50' in locals() else None,
+            "ma200": ma200 if 'ma200' in locals() else None,
+            "rsi": rsi if 'rsi' in locals() else None,
+            "volatilidad": volatilidad if 'volatilidad' in locals() else None,
+            "pe": pe if 'pe' in locals() else (info.get('trailingPE') if 'info' in locals() and isinstance(info, dict) else None),
+            "forward_pe": forward_pe if 'forward_pe' in locals() else (info.get('forwardPE') if 'info' in locals() and isinstance(info, dict) else None),
+            "peg": peg if 'peg' in locals() else (info.get('pegRatio') if 'info' in locals() and isinstance(info, dict) else None),
+            "price_to_book": price_to_book if 'price_to_book' in locals() else (info.get('priceToBook') if 'info' in locals() and isinstance(info, dict) else None),
+            "valor_dcf_base": valor_dcf_base if 'valor_dcf_base' in locals() else (dcf_val if 'dcf_val' in locals() else None),
+            "obj_med": obj_med if 'obj_med' in locals() else (target_mean if 'target_mean' in locals() else None),
+            "potencial_dcf": potencial_dcf if 'potencial_dcf' in locals() else None,
+            "potencial_analistas": potencial_analistas if 'potencial_analistas' in locals() else None,
+            "roe": roe if 'roe' in locals() else (info.get('returnOnEquity') if 'info' in locals() and isinstance(info, dict) else None),
+            "margen": margen if 'margen' in locals() else (info.get('profitMargins') if 'info' in locals() and isinstance(info, dict) else None),
+            "margen_operativo": margen_operativo if 'margen_operativo' in locals() else (info.get('operatingMargins') if 'info' in locals() and isinstance(info, dict) else None),
+            "deuda": deuda if 'deuda' in locals() else (info.get('totalDebt') if 'info' in locals() and isinstance(info, dict) else None),
+            "flujo_caja": flujo_caja if 'flujo_caja' in locals() else (info.get('operatingCashflow') if 'info' in locals() and isinstance(info, dict) else None),
+            "ingresos": ingresos if 'ingresos' in locals() else (info.get('totalRevenue') if 'info' in locals() and isinstance(info, dict) else None),
+            "beneficio": beneficio if 'beneficio' in locals() else (info.get('netIncomeToCommon') if 'info' in locals() and isinstance(info, dict) else None),
+            "eps": eps if 'eps' in locals() else (info.get('trailingEps') if 'info' in locals() and isinstance(info, dict) else None),
+            "crecimiento_ingresos": crecimiento_ingresos if 'crecimiento_ingresos' in locals() else (info.get('revenueGrowth') if 'info' in locals() and isinstance(info, dict) else None),
+            "crecimiento_beneficios": crecimiento_beneficios if 'crecimiento_beneficios' in locals() else (info.get('earningsGrowth') if 'info' in locals() and isinstance(info, dict) else None),
+            "dividend_yield": dividend_yield if 'dividend_yield' in locals() else (info.get('dividendYield') if 'info' in locals() and isinstance(info, dict) else None),
+            "score": score if 'score' in locals() else (market_ai_score if 'market_ai_score' in locals() else None),
+            "desglose_score": desglose_score if 'desglose_score' in locals() else None,
+            "ML 5D": ml_5d if 'ml_5d' in locals() else None,
+            "ML 20D": ml_20d if 'ml_20d' in locals() else None,
+            "ML 60D": ml_60d if 'ml_60d' in locals() else None,
+            "ML 120D": ml_120d if 'ml_120d' in locals() else None,
+            "prediccion_hibrida": prediccion_hibrida if 'prediccion_hibrida' in locals() else None,
+            "señal": senal if 'senal' in locals() else (signal if 'signal' in locals() else "NEUTRAL"),
+            "confianza": confianza if 'confianza' in locals() else None,
+            "riesgo": riesgo if 'riesgo' in locals() else None
+        }
+
+        # 2. Ejecución protegida de la IA
+        analisis_ai = generar_analisis_ai(datos_ai)
+
+        # 3. Renderizado flexible de la sección en Streamlit
+        st.markdown("---")
+        st.header("🧠 ANÁLISIS MARKET AI")
+
+        if isinstance(analisis_ai, dict):
+            # Renderizado por claves de diccionario
+            if "conclusion" in analisis_ai or "Conclusión" in analisis_ai:
+                st.subheader("📌 Conclusión")
+                st.write(analisis_ai.get("conclusion") or analisis_ai.get("Conclusión"))
+
+            if "resumen" in analisis_ai or "Resumen" in analisis_ai:
+                st.write(analisis_ai.get("resumen") or analisis_ai.get("Resumen"))
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("### 🟢 Puntos positivos")
+                pos = analisis_ai.get("puntos_positivos") or analisis_ai.get("Puntos positivos", [])
+                if isinstance(pos, list):
+                    for p in pos:
+                        st.markdown(f"- {p}")
+                else:
+                    st.write(pos)
+
+            with col2:
+                st.markdown("### 🔴 Puntos negativos")
+                neg = analisis_ai.get("puntos_negativos") or analisis_ai.get("Puntos negativos", [])
+                if isinstance(neg, list):
+                    for n in neg:
+                        st.markdown(f"- {n}")
+                else:
+                    st.write(neg)
+
+            col3, col4 = st.columns(2)
+            with col3:
+                st.markdown("### ⚠️ Riesgos")
+                riesgos_val = analisis_ai.get("riesgos") or analisis_ai.get("Riesgos", [])
+                if isinstance(riesgos_val, list):
+                    for r in riesgos_val:
+                        st.markdown(f"- {r}")
+                else:
+                    st.write(riesgos_val)
+
+            with col4:
+                st.markdown("### 🚀 Catalizadores")
+                cat_val = analisis_ai.get("catalizadores") or analisis_ai.get("Catalizadores", [])
+                if isinstance(cat_val, list):
+                    for c in cat_val:
+                        st.markdown(f"- {c}")
+                else:
+                    st.write(cat_val)
+
+            st.markdown("### ⚠️ Conflictos entre modelos")
+            st.write(analisis_ai.get("conflictos") or analisis_ai.get("Conflictos entre modelos", "No se detectaron conflictos entre modelos."))
+
+            st.markdown("### 🔄 ¿Qué haría cambiar la opinión?")
+            st.write(analisis_ai.get("cambio_opinion") or analisis_ai.get("¿Qué haría cambiar la opinión?", "N/D"))
+
+            c_meta1, c_meta2 = st.columns(2)
+            with c_meta1:
+                st.info(f"**📅 Horizonte:** {analisis_ai.get('horizonte', analisis_ai.get('Horizonte', 'N/D'))}")
+            with c_meta2:
+                st.info(f"**📊 Calidad del análisis:** {analisis_ai.get('calidad', analisis_ai.get('Calidad del análisis', 'N/D'))}")
+
+        elif isinstance(analisis_ai, str):
+            # Renderizado directo si devuelve string / markdown
+            st.markdown(analisis_ai)
+        else:
+            st.warning("El módulo AI Analyst devolvió un formato no reconocido.")
+
+    except Exception as e:
+        st.error(f"⚠️ Error al generar el Análisis Market AI: {str(e)}")
+        st.info("El resto de la aplicación continuará funcionando normalmente.")
         
    # ==========================================
 # SECCIÓN: MARKET AI BACKTESTING
