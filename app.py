@@ -91,7 +91,52 @@ def render_seccion_monitorizacion():
         
         df_acc_show.columns = ["Ticker", "Precio ($)", "Score", "Δ Score", "DCF ($)", "Pot. DCF (%)", "ML", "Hybrid", "Señal"]
         st.dataframe(df_acc_show, use_container_width=True)
+# =====================================================================
+        # DECISIÓN CENTRAL Y RESUMEN MARKET AI (INSERTAR AQUÍ)
+        # =====================================================================
+        datos_empresa = {
+            'score': score_existente,        # Sustituye 'score_existente' por tu variable local de score
+            'ml_preds': ml_preds_existentes, # Sustituye por tu variable de predicciones ML
+            'dcf': dcf_existente,            # Sustituye por tu variable de DCF
+            'analistas': analistas_existente,# Sustituye por tu variable de analistas
+            'tecnico': tecnico_existente,    # Sustituye por tu variable de técnico
+            'riesgo': riesgo_existente,      # Sustituye por tu variable de riesgo
+            'precio': precio_actual          # Sustituye por tu variable de precio
+        }
 
+        # Generas la decisión central
+        decision = generar_decision_market_ai(datos_empresa)
+
+        # Renderizas la interfaz principal
+        st.markdown("### 🎯 DECISIÓN FINAL MARKET AI")
+        c1, c2, c3, c4 = st.columns(4)
+
+        color_map = {
+            "COMPRA FUERTE": "🟢", "COMPRA": "🟢", 
+            "MANTENER": "🟡", 
+            "VENTA": "🔴", "VENTA FUERTE": "🔴"
+        }
+
+        c1.metric("Señal Final", f"{color_map.get(decision['senal_final'], '⚪')} {decision['senal_final']}")
+        c2.metric("Confianza", f"{decision['confianza']}/100")
+        c3.metric("Horizonte", decision['horizonte'])
+        c4.metric("Consenso", decision['consenso'])
+
+        st.markdown("---")
+
+        # Muestra de métricas clave antes de tus pestañas habituales
+        col_p1, col_p2, col_p3 = st.columns(3)
+        col_p1.write(f"**Precio Actual:** {datos_empresa.get('precio', 'N/D')}")
+        col_p2.write(f"**Valor Intrínseco DCF:** {decision['valoracion']}")
+        col_p3.write(f"**Objetivo Analistas:** {datos_empresa.get('analistas', {}).get('target', 'N/D')}")
+
+        st.divider()
+
+        # =====================================================================
+        # AQUÍ EMPIEZAN TUS PESTAÑAS HABITUALES
+        # tab1, tab2, tab3... = st.tabs(...)
+        # =====================================================================
+    
     # 6. CENTRO DE ALERTAS
     st.subheader("🚨 CENTRO DE ALERTAS")
     if not alertas:
