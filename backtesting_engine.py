@@ -1,9 +1,59 @@
 import pandas as pd
 import numpy as np
+import yfinance as yf
+
+# Cache global para evitar descargas duplicadas de Yahoo Finance
+_CACHE_HISTORICO = {}
+
+def obtener_historico_cache(ticker, period="2y", interval="1d"):
+    """
+    Obtiene el historial de precios desde Yahoo Finance utilizando un caché en memoria.
+    """
+    key = f"{ticker}_{period}_{interval}"
+    if key in _CACHE_HISTORICO:
+        return _CACHE_HISTORICO[key].copy()
+    
+    try:
+        data = yf.Ticker(ticker).history(period=period, interval=interval)
+        if not data.empty:
+            _CACHE_HISTORICO[key] = data
+            return data.copy()
+    except Exception:
+        pass
+        
+    return pd.DataFrame()
+
+
+def calcular_indicadores_historicos(df):
+    """
+    Calcula indicadores técnicos históricos (RSI 14, SMA 20, SMA 50).
+    """
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+        return df
+
+    df_res = df.copy()
+    col_close = 'Close' if 'Close' in df_res.columns else ('close' if 'close' in df_res.columns else None)
+    
+    if not col_close:
+        return df_res
+
+    # Cálculo del RSI (14 periodos)
+    delta = df_res[col_close].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / (loss + 1e-9)
+    df_res["RSI_14"] = 100 - (100 / (1 + rs))
+
+    # Medias móviles
+    df_res["SMA_20"] = df_res[col_close].rolling(window=20).mean()
+    df_res["SMA_50"] = df_res[col_close].rolling(window=50).mean()
+
+    return df_res
+
 
 def simular_senal_historica(df_row, score_historico):
     """
-    Función auxilar para determinar la señal histórica sin Look-Ahead Bias.
+    Determina la señal histórica sin Look-Ahead Bias.
     """
     rsi = df_row.get("RSI_14", 50.0)
     if score_historico >= 68:
@@ -26,7 +76,7 @@ def ejecutar_backtest_engine(
     take_profit_pct=10.0
 ):
     """
-    Motor completo de Backtesting para simulación de estrategias históricas de MARKET AI.
+    Motor completo de Backtesting para MARKET AI.
     """
     if df_historico is None or not isinstance(df_historico, pd.DataFrame) or df_historico.empty:
         return {
@@ -42,13 +92,11 @@ def ejecutar_backtest_engine(
         }
 
     df = df_historico.copy()
-
-    # Identificar columna de precios
     col_close = 'Close' if 'Close' in df.columns else ('close' if 'close' in df.columns else None)
     if not col_close:
         return {"error": "El DataFrame no contiene la columna de precio 'Close'."}
 
-    posicion = 0  # 0: Sin posición, 1: Comprado
+    posicion = 0
     precio_entrada = 0.0
     fecha_entrada = None
     capital = float(capital_inicial)
@@ -58,17 +106,14 @@ def ejecutar_backtest_engine(
     operaciones = []
     curva_capital = []
 
-    # Bucle principal de simulación (DENTRO de la función)
     for i in range(len(df)):
         row = df.iloc[i]
         precio_actual = float(row[col_close])
         fecha_actual = str(row.name) if hasattr(row, 'name') else f"Dia {i+1}"
         score_t = float(row.get("SCORE_HISTORICO", 50.0))
 
-        # 1. Obtener señal simulada
         senal_i = simular_senal_historica(row, score_t)
 
-        # 2. Gestión de Posición Abierta
         if posicion == 1:
             retorno_unrealized = ((precio_actual - precio_entrada) / precio_entrada) * 100.0
 
@@ -97,7 +142,6 @@ def ejecutar_backtest_engine(
                     "capital_resultante": round(capital, 2)
                 })
 
-        # 3. Evaluar Entrada
         elif posicion == 0:
             if senal_i in ["COMPRA FUERTE", "COMPRA"]:
                 posicion = 1
@@ -105,7 +149,6 @@ def ejecutar_backtest_engine(
                 precio_entrada = precio_actual + comision_entrada
                 fecha_entrada = fecha_actual
 
-        # 4. Cálculo de Métricas de Capital
         if capital > max_capital:
             max_capital = capital
         drawdown_actual = ((max_capital - capital) / max_capital) * 100.0
@@ -117,13 +160,11 @@ def ejecutar_backtest_engine(
             "capital": round(capital, 2)
         })
 
-    # Métricas consolidadas finales
     tot_ops = len(operaciones)
     ops_ganadoras = [op for op in operaciones if op.get("retorno_pct", 0) > 0]
     ops_perdedoras = [op for op in operaciones if op.get("retorno_pct", 0) <= 0]
     
     win_rate = (len(ops_ganadoras) / tot_ops * 100.0) if tot_ops > 0 else 0.0
-
     sum_ganancias = sum([op["retorno_pct"] for op in ops_ganadoras])
     sum_perdidas = abs(sum([op["retorno_pct"] for op in ops_perdedoras]))
     profit_factor = (sum_ganancias / sum_perdidas) if sum_perdidas > 0 else (sum_ganancias if sum_ganancias > 0 else 1.0)
