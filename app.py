@@ -9,6 +9,89 @@ import requests
 import os
 import re
 import time
+from ranking_engine import calcular_top_oportunidades, backtest_top5_walk_forward, UNIVERSO_SP500_DEFAULT
+
+# --- CACHÉ PARA EVITAR RETARDOS EXCESIVOS ---
+@st.cache_data(ttl=3600, show_spinner=False)
+def obtener_top_5_cached(score_min, potencial_min, confianza_min, riesgo_max):
+    return calcular_top_oportunidades(
+        universo=UNIVERSO_SP500_DEFAULT,
+        score_min=score_min,
+        potencial_dcf_min=potencial_min,
+        confianza_min=confianza_min,
+        riesgo_max=riesgo_max
+    )
+
+def render_seccion_top5():
+    st.header("🏆 TOP 5 OPORTUNIDADES MARKET AI")
+    st.caption("Selección automatizada multivariable sobre el universo S&P 500.")
+
+    # --- SIDEBAR / CONTROLES DE FILTROS ---
+    st.sidebar.subheader("⚙️ Filtros del Top 5")
+    score_min = st.sidebar.slider("Score Mínimo", 0, 100, 50)
+    potencial_min = st.sidebar.slider("Potencial DCF Mínimo (%)", -50, 100, -10)
+    confianza_min = st.sidebar.slider("Confianza Mínima (%)", 0, 100, 40)
+    riesgo_max = st.sidebar.selectbox("Riesgo Máximo Permitido", ["BAJO", "MEDIO", "ALTO"], index=2)
+
+    col_btn, col_info = st.columns([1, 3])
+    with col_btn:
+        if st.button("🔄 ACTUALIZAR TOP 5"):
+            st.cache_data.clear()
+            st.rerun()
+
+    # Cargar datos
+    with st.spinner("Analizando universo y calculando ranking multivariable..."):
+        res = obtener_top_5_cached(score_min, potencial_min, confianza_min, riesgo_max)
+
+    top_5 = res["top_5"]
+    conteo = res["conteo"]
+    advertencias = res["advertencias"]
+
+    # --- ADVERTENCIAS Y DIAGNÓSTICO ---
+    for adv in advertencias:
+        st.warning(adv)
+
+    st.info(f"📊 **Resumen del Análisis**: Analizadas: **{conteo['analizadas']}** | Correctas: **{conteo['correctas']}** | Con Errores/Excluidas: **{conteo['errores']}**")
+
+    # --- DESPLIEGUE DEL TOP 5 ---
+    if not top_5:
+        st.error("No se encontraron acciones que cumplan los criterios de filtro seleccionados.")
+    else:
+        medallas = ["🥇 1.", "🥈 2.", "🥉 3.", "🏅 4.", "🏅 5."]
+        for i, item in enumerate(top_5):
+            medalla = medallas[i] if i < len(medallas) else f"{i+1}."
+            
+            with st.container():
+                st.markdown(f"### {medalla} {item['ticker']} — {item['nombre']}")
+                c1, c2, c3, c4 = st.columns(4)
+                
+                color_senal = "🟢" if "COMPRA" in item['senal'] else ("🔴" if "VENTA" in item['senal'] else "🟡")
+                c1.markdown(f"**Señal**: {color_senal} {item['senal']}")
+                c1.markdown(f"**Score MARKET AI**: `{item['score_mai']}/100`")
+                
+                c2.markdown(f"**Confianza**: `{item['confianza']}%`")
+                c2.markdown(f"**Precio Actual**: `${item['precio']}`")
+                
+                c3.markdown(f"**Fair Value DCF**: `${item['fair_value_dcf']}`")
+                c4.markdown(f"**Potencial DCF**: `{item['potencial_dcf']}%`")
+                
+                st.caption(f"🤖 **Predicción ML**: {item['ml_pred']} | **Mejor Horizonte**: {item['mejor_horizonte']} | **Riesgo**: {item['riesgo']}")
+                st.divider()
+
+    # --- BACKTESTING Y WALK-FORWARD ---
+    st.subheader("📊 RENDIMIENTO HISTÓRICO DEL TOP 5 (WALK-FORWARD)")
+    st.caption("Evaluación sin Look-Ahead Bias: Rendimiento simulado si se hubiera rebalanceado el Top 5 en cada período.")
+
+    bt_res = backtest_top5_walk_forward()
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Rentabilidad Acum. TOP 5", f"{bt_res['rentabilidad_acumulada_top5']}%")
+    m2.metric("Rentabilidad Buy & Hold", f"{bt_res['rentabilidad_acumulada_buy_hold']}%")
+    m3.metric("Tasa de Acierto (Win Rate)", f"{bt_res['win_rate_pct']}%")
+    m4.metric("Max Drawdown", f"-{bt_res['max_drawdown_pct']}%")
+
+# Llamar a la función dentro de la vista principal de Streamlit
+render_seccion_top5()
 # Cache para evitar descargas repetidas de Yahoo Finance
 _CACHE_HISTORICO = {}
 
