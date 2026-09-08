@@ -1,243 +1,150 @@
-import numpy as np
 import pandas as pd
-import streamlit as st
-# Dentro del bucle de simulación día a día en backtesting_engine.py:
-from signals_engine import simular_senal_historica
-def ejecutar_backtest_engine(df_test, ...):
-    """
-    Función principal de backtesting.
-    Recibe 'df_test' como argumento.
-    """
-    posicion = 0
-    precio_entrada = 0.0
-    operaciones = []# ...
-for i in range(len(df_test)):
-    row = df_test.iloc[i]
-    score_t = df_test['SCORE_HISTORICO'].iloc[i] if 'SCORE_HISTORICO' in df_test else 50.0
-    
-    # Generar señal sin Look-Ahead Bias usando datos disponibles en fecha i
-    senal_i = simular_senal_historica(row, score_t)
-    
-    # Lógica de Ejecución en Backtesting:
-    if senal_i in ["COMPRA FUERTE", "COMPRA"] and posicion == 0:
-        posicion = 1
-        precio_entrada = row['Close']
-        operaciones.append({'tipo': 'COMPRA', 'fecha': row['Fecha'], 'precio': precio_entrada, 'tipo_senal': senal_i})
-    elif senal_i == "VENTA" and posicion == 1:
-        posicion = 0
-        precio_salida = row['Close']
-        ret = ((precio_salida - precio_entrada) / precio_entrada) * 100.0
-        operaciones.append({'tipo': 'VENTA', 'fecha': row['Fecha'], 'precio': precio_salida, 'retorno_pct': ret})
+import numpy as np
+from datetime import datetime
 
-@st.cache_data(ttl=86400, show_spinner=False)
-def obtener_historico_cache(ticker, periodo="5y"):
-    """Descarga y cachea los datos históricos usando yfinance."""
-    import yfinance as yf
-    try:
-        # Se asegura el uso del argumento 'periodo' asignado a 'period' de yfinance
-        data = yf.Ticker(ticker).history(period=periodo)
-        if data is None or data.empty:
-            return None, f"No se encontraron datos para el ticker '{ticker}'."
-        if len(data) < 20:
-            return None, f"Datos insuficientes para '{ticker}': solo hay {len(data)} sesiones disponibles."
-        return data, None
-    except Exception as e:
-        return None, f"Error descargando histórico para {ticker}: {str(e)}"
-
-def calcular_indicadores_historicos(df_slice):
-    """Calcula indicadores técnicos usando ÚNICAMENTE datos pasados."""
-    len_slice = len(df_slice)
-    if len_slice < 5:
-        return {}
-    
-    close = df_slice['Close'].values
-    precio_actual = float(close[-1])
-    
-    ma20 = float(np.mean(close[-20:])) if len_slice >= 20 else precio_actual
-    ma50 = float(np.mean(close[-50:])) if len_slice >= 50 else ma20
-    ma200 = float(np.mean(close[-200:])) if len_slice >= 200 else ma50
-    
-    if len_slice >= 15:
-        delta = np.diff(close)
-        gains = np.where(delta > 0, delta, 0)
-        losses = np.where(delta < 0, -delta, 0)
-        avg_gain = np.mean(gains[-14:])
-        avg_loss = np.mean(losses[-14:])
-        rs = avg_gain / (avg_loss + 1e-6)
-        rsi = float(100 - (100 / (1 + rs)))
-    else:
-        rsi = 50.0
-        
-    momentum = float(((close[-1] - close[-11]) / close[-11]) * 100.0) if len_slice >= 11 else 0.0
-    
-    return {
-        "precio": precio_actual,
-        "ma20": ma20,
-        "ma50": ma50,
-        "ma200": ma200,
-        "rsi": rsi,
-        "momentum": momentum,
-        "tiene_ma200": len_slice >= 200
-    }
-
-def simular_market_ai_score_historico(tec_data, es_metal=False):
-    """Simula el score predictivo basado en los datos a la fecha de corte."""
-    if not tec_data:
-        return 50.0, "🟡 NEUTRAL", 50
-    
-    score = 50.0
-    precio = tec_data["precio"]
-    
-    if precio > tec_data["ma20"]: score += 10
-    else: score -= 10
-    
-    if tec_data["ma20"] > tec_data["ma50"]: score += 15
-    else: score -= 15
-    
-    if tec_data["tiene_ma200"]:
-        if precio > tec_data["ma200"]: score += 10
-        else: score -= 10
-        
-    if tec_data["rsi"] < 30: score += 10
-    elif tec_data["rsi"] > 70: score -= 10
-    
-    if tec_data["momentum"] > 0: score += 5
-    else: score -= 5
-    
-    score = float(np.clip(score, 0.0, 100.0))
-    
-    if score >= 60:
-        direccion = "🟢 ALCISTA"
-        confianza = int(np.clip(50 + (score - 60) * 1.15, 50, 95))
-    elif score <= 40:
-        direccion = "🔴 BAJISTA"
-        confianza = int(np.clip(50 + (40 - score) * 1.15, 50, 95))
-    else:
-        direccion = "🟡 NEUTRAL"
-        confianza = 50
-        
-    return score, direccion, confianza
-
-def calcular_metricas_backtest(df_res, ret_buy_hold):
-    """Genera las tablas y métricas cuantitativas agrupadas."""
-    tot = len(df_res)
-    aciertos = len(df_res[df_res["resultado"] == "✅ Acierto"])
-    fallos = len(df_res[df_res["resultado"] == "❌ Fallo"])
-    tasa_acierto = (aciertos / tot) * 100.0 if tot > 0 else 0.0
-    
-    ret_media = float(df_res["rentabilidad"].mean())
-    mejor_res = float(df_res["rentabilidad"].max())
-    peor_res = float(df_res["rentabilidad"].min())
-    ret_acum = float(df_res["rentabilidad"].sum())
-
-    bins_conf = [49, 59, 69, 79, 89, 100]
-    labels_conf = ["50-59%", "60-69%", "70-79%", "80-89%", "90-100%"]
-    df_res['rango_conf'] = pd.cut(df_res['confianza'], bins=bins_conf, labels=labels_conf)
-    
-    tabla_confianza = df_res.groupby('rango_conf', observed=False).agg(
-        Predicciones=('resultado', 'count'),
-        Aciertos=('resultado', lambda x: (x == "✅ Acierto").sum()),
-        Tasa_Acierto=('resultado', lambda x: f"{((x == '✅ Acierto').sum()/len(x)*100):.1f}%" if len(x)>0 else "0%"),
-        Rentabilidad_Media=('rentabilidad', lambda x: f"{x.mean():+.2f}%" if len(x)>0 else "0.00%")
-    )
-
-    bins_score = [-1, 39, 54, 69, 84, 100]
-    labels_score = ["0-39", "40-54", "55-69", "70-84", "85-100"]
-    df_res['rango_score'] = pd.cut(df_res['score'], bins=bins_score, labels=labels_score)
-    
-    tabla_score = df_res.groupby('rango_score', observed=False).agg(
-        Predicciones=('resultado', 'count'),
-        Aciertos=('resultado', lambda x: (x == "✅ Acierto").sum()),
-        Tasa_Acierto=('resultado', lambda x: f"{((x == '✅ Acierto').sum()/len(x)*100):.1f}%" if len(x)>0 else "0%"),
-        Rentabilidad_Media=('rentabilidad', lambda x: f"{x.mean():+.2f}%" if len(x)>0 else "0.00%")
-    )
-
-    return {
-        "numero_predicciones": tot,
-        "numero_aciertos": aciertos,
-        "numero_fallos": fallos,
-        "tasa_acierto": round(tasa_acierto, 1),
-        "rentabilidad_media": round(ret_media, 2),
-        "mejor_resultado": round(mejor_res, 2),
-        "peor_resultado": round(peor_res, 2),
-        "retorno_total": round(ret_acum, 2),
-        "retorno_buy_hold": round(ret_buy_hold, 2),
-        "tabla_confianza": tabla_confianza,
-        "tabla_score": tabla_score
-    }
-
-def ejecutar_backtest_engine(ticker, periodo_meses, horizonte_dias, es_metal=False):
-    """Ejecuta el análisis de backtesting de forma robusta."""
-    df, err_msg = obtener_historico_cache(ticker, periodo="5y")
-    if df is None:
-        return None, err_msg
-    
-    df = df.sort_index()
-    total_barras = len(df)
-    horizonte_dias = int(horizonte_dias)
-    
-    fin_idx = total_barras - horizonte_dias
-    if fin_idx <= 10:
-        return None, f"El horizonte de {horizonte_dias} días es demasiado amplio para los datos de {ticker}."
-        
-    barras_solicitadas = int((periodo_meses / 12) * 252)
-    inicio_idx = max(10, fin_idx - barras_solicitadas)
-    
-    if inicio_idx >= fin_idx:
-        inicio_idx = max(5, fin_idx - 20)
-    
-    registros = []
-    paso = max(1, horizonte_dias // 2)
-    
-    for i in range(inicio_idx, fin_idx, paso):
-        df_slice = df.iloc[:i+1]
-        
-        fecha_senal = df_slice.index[-1].strftime("%Y-%m-%d")
-        precio_inicial = float(df_slice['Close'].iloc[-1])
-        precio_final = float(df['Close'].iloc[i + horizonte_dias])
-        
-        rentabilidad = ((precio_final - precio_inicial) / precio_inicial) * 100.0
-        
-        tec_data = calcular_indicadores_historicos(df_slice)
-        score, direccion, confianza = simular_market_ai_score_historico(tec_data, es_metal)
-        
-        if direccion == "🟢 ALCISTA":
-            resultado = "✅ Acierto" if rentabilidad > 0.0 else "❌ Fallo"
-        elif direccion == "🔴 BAJISTA":
-            resultado = "✅ Acierto" if rentabilidad < 0.0 else "❌ Fallo"
+# Intentar importar el simulador de señales si existe en el proyecto
+try:
+    from signals_engine import simular_senal_historica
+except ImportError:
+    def simular_senal_historica(df_row, score_historico):
+        rsi = df_row.get("RSI_14", 50.0)
+        if score_historico >= 68:
+            return "COMPRA FUERTE"
+        elif score_historico >= 56:
+            return "COMPRA"
+        elif score_historico <= 38:
+            return "VENTA"
+        elif rsi > 70 or rsi < 30:
+            return "VIGILAR"
         else:
-            resultado = "✅ Acierto" if abs(rentabilidad) <= 2.5 else "⚪ Neutral"
-            
-        registros.append({
-            "fecha": fecha_senal,
-            "ticker": ticker,
-            "score": round(score, 1),
-            "direccion": direccion,
-            "confianza": confianza,
-            "precio_inicial": round(precio_inicial, 2),
-            "precio_final": round(precio_final, 2),
-            "rentabilidad": round(rentabilidad, 2),
-            "resultado": resultado,
-            "horizonte": f"{horizonte_dias}d",
-            "ma20_gt_ma50": tec_data.get("ma20", 0) > tec_data.get("ma50", 0),
-            "precio_gt_ma200": precio_inicial > tec_data.get("ma200", 0)
+            return "MANTENER"
+
+
+def ejecutar_backtest_engine(
+    df_historico, 
+    capital_inicial=10000.0, 
+    comision_pct=0.1, 
+    stop_loss_pct=5.0, 
+    take_profit_pct=10.0
+):
+    """
+    Motor completo de Backtesting para simulación de estrategias históricas.
+    Garantiza cero Look-Ahead Bias utilizando únicamente datos pasados.
+    """
+    if df_historico is None or not isinstance(df_historico, pd.DataFrame) or df_historico.empty:
+        return {
+            "error": "No hay datos suficientes para ejecutar el backtest.",
+            "capital_final": capital_inicial,
+            "retorno_total_pct": 0.0,
+            "win_rate_pct": 0.0,
+            "max_drawdown_pct": 0.0,
+            "profit_factor": 0.0,
+            "total_operaciones": 0,
+            "operaciones": [],
+            "curva_capital": []
+        }
+
+    df = df_historico.copy()
+
+    # Normalizar nombres de columnas de precios
+    col_close = 'Close' if 'Close' in df.columns else ('close' if 'close' in df.columns else None)
+    if not col_close:
+        return {"error": "El DataFrame no contiene la columna de precio 'Close'."}
+
+    posicion = 0  # 0: Sin posición, 1: Comprado (Long)
+    precio_entrada = 0.0
+    fecha_entrada = None
+    capital = float(capital_inicial)
+    max_capital = capital
+    max_drawdown = 0.0
+    
+    operaciones = []
+    curva_capital = []
+
+    # Iterar sobre cada vela histórica (sin anticipar precios futuros)
+    for i in range(len(df)):
+        row = df.iloc[i]
+        precio_actual = float(row[col_close])
+        fecha_actual = str(row.name) if hasattr(row, 'name') else f"Día {i+1}"
+        score_t = float(row.get("SCORE_HISTORICO", 50.0))
+
+        # 1. Obtener la señal técnica/predictiva simulada
+        senal_i = simular_senal_historica(row, score_t)
+
+        # 2. Control de posiciones activas (Gestión de Riesgo)
+        if posicion == 1:
+            retorno_unrealized = ((precio_actual - precio_entrada) / precio_entrada) * 100.0
+
+            # Evaluar Stop Loss o Take Profit
+            alcanzo_stop = stop_loss_pct is not None and retorno_unrealized <= -abs(stop_loss_pct)
+            alcanzo_tp = take_profit_pct is not None and retorno_unrealized >= abs(take_profit_pct)
+            es_venta_senal = senal_i in ["VENTA", "VENTA FUERTE"]
+
+            if alcanzó_stop or alcanzó_tp or es_venta_senal:
+                motivo_salida = "Stop Loss" if alcanzó_stop else ("Take Profit" if alcanzó_tp else "Señal Venta")
+                
+                # Ejecutar Venta
+                posicion = 0
+                comision_salida = precio_actual * (comision_pct / 100.0)
+                precio_neto_salida = precio_actual - comision_salida
+                
+                retorno_realizado_pct = ((precio_neto_salida - precio_entrada) / precio_entrada) * 100.0
+                capital = capital * (1 + (retorno_realizado_pct / 100.0))
+
+                operaciones.append({
+                    "tipo": "VENTA",
+                    "motivo": motivo_salida,
+                    "fecha_entrada": fecha_entrada,
+                    "fecha_salida": fecha_actual,
+                    "precio_entrada": round(precio_entrada, 2),
+                    "precio_salida": round(precio_actual, 2),
+                    "retorno_pct": round(retorno_realizado_pct, 2),
+                    "capital_resultante": round(capital, 2)
+                })
+
+        # 3. Evaluar nueva Entrada (Compra)
+        elif posicion == 0:
+            if senal_i in ["COMPRA FUERTE", "COMPRA"]:
+                posicion = 1
+                comision_entrada = precio_actual * (comision_pct / 100.0)
+                precio_entrada = precio_actual + comision_entrada
+                fecha_entrada = fecha_actual
+
+        # 4. Cálculo de Max Drawdown y seguimiento de capital
+        if capital > max_capital:
+            max_capital = capital
+        drawdown_actual = ((max_capital - capital) / max_capital) * 100.0
+        if drawdown_actual > max_drawdown:
+            max_drawdown = drawdown_actual
+
+        curva_capital.append({
+            "fecha": fecha_actual,
+            "capital": round(capital, 2)
         })
-        
-    if not registros:
-        return None, "No se pudieron calcular predicciones en la ventana especificada."
-        
-    df_res = pd.DataFrame(registros)
+
+    # Métricas consolidadas
+    tot_ops = len(operaciones)
+    ops_ganadoras = [op for op in operaciones if op.get("retorno_pct", 0) > 0]
+    ops_perdedoras = [op for op in operaciones if op.get("retorno_pct", 0) <= 0]
     
-    p_inicio_periodo = float(df['Close'].iloc[inicio_idx])
-    p_fin_periodo = float(df['Close'].iloc[fin_idx])
-    ret_buy_hold = ((p_fin_periodo - p_inicio_periodo) / p_inicio_periodo) * 100.0
-    
-    metricas = calcular_metricas_backtest(df_res, ret_buy_hold)
-    
-    resultado_completo = {
-        "resultados": df_res,
-        "metricas": metricas,
-        "buy_hold": round(ret_buy_hold, 2)
+    win_rate = (len(ops_ganadoras) / tot_ops * 100.0) if tot_ops > 0 else 0.0
+
+    sum_ganancias = sum([op["retorno_pct"] for op in ops_ganadoras])
+    sum_perdidas = abs(sum([op["retorno_pct"] for op in ops_perdedoras]))
+    profit_factor = (sum_ganancias / sum_perdidas) if sum_perdidas > 0 else (sum_ganancias if sum_ganancias > 0 else 1.0)
+
+    retorno_total = ((capital - capital_inicial) / capital_inicial) * 100.0
+
+    return {
+        "capital_inicial": capital_inicial,
+        "capital_final": round(capital, 2),
+        "retorno_total_pct": round(retorno_total, 2),
+        "win_rate_pct": round(win_rate, 2),
+        "max_drawdown_pct": round(max_drawdown, 2),
+        "profit_factor": round(profit_factor, 2),
+        "total_operaciones": tot_ops,
+        "operaciones_ganadoras": len(ops_ganadoras),
+        "operaciones_perdedoras": len(ops_perdedoras),
+        "operaciones": operaciones,
+        "curva_capital": curva_capital
     }
-    
-    return (df_res, round(ret_buy_hold, 2)), resultado_completo
