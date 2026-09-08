@@ -1,23 +1,21 @@
 import pandas as pd
 import numpy as np
-from datetime import datetime
 
-# Intentar importar el simulador de señales si existe en el proyecto
-try:
-    from signals_engine import simular_senal_historica
-except ImportError:
-    def simular_senal_historica(df_row, score_historico):
-        rsi = df_row.get("RSI_14", 50.0)
-        if score_historico >= 68:
-            return "COMPRA FUERTE"
-        elif score_historico >= 56:
-            return "COMPRA"
-        elif score_historico <= 38:
-            return "VENTA"
-        elif rsi > 70 or rsi < 30:
-            return "VIGILAR"
-        else:
-            return "MANTENER"
+def simular_senal_historica(df_row, score_historico):
+    """
+    Función auxilar para determinar la señal histórica sin Look-Ahead Bias.
+    """
+    rsi = df_row.get("RSI_14", 50.0)
+    if score_historico >= 68:
+        return "COMPRA FUERTE"
+    elif score_historico >= 56:
+        return "COMPRA"
+    elif score_historico <= 38:
+        return "VENTA"
+    elif rsi > 70 or rsi < 30:
+        return "VIGILAR"
+    else:
+        return "MANTENER"
 
 
 def ejecutar_backtest_engine(
@@ -28,8 +26,7 @@ def ejecutar_backtest_engine(
     take_profit_pct=10.0
 ):
     """
-    Motor completo de Backtesting para simulación de estrategias históricas.
-    Garantiza cero Look-Ahead Bias utilizando únicamente datos pasados.
+    Motor completo de Backtesting para simulación de estrategias históricas de MARKET AI.
     """
     if df_historico is None or not isinstance(df_historico, pd.DataFrame) or df_historico.empty:
         return {
@@ -46,12 +43,12 @@ def ejecutar_backtest_engine(
 
     df = df_historico.copy()
 
-    # Normalizar nombres de columnas de precios
+    # Identificar columna de precios
     col_close = 'Close' if 'Close' in df.columns else ('close' if 'close' in df.columns else None)
     if not col_close:
         return {"error": "El DataFrame no contiene la columna de precio 'Close'."}
 
-    posicion = 0  # 0: Sin posición, 1: Comprado (Long)
+    posicion = 0  # 0: Sin posición, 1: Comprado
     precio_entrada = 0.0
     fecha_entrada = None
     capital = float(capital_inicial)
@@ -61,29 +58,27 @@ def ejecutar_backtest_engine(
     operaciones = []
     curva_capital = []
 
-    # Iterar sobre cada vela histórica (sin anticipar precios futuros)
+    # Bucle principal de simulación (DENTRO de la función)
     for i in range(len(df)):
         row = df.iloc[i]
         precio_actual = float(row[col_close])
-        fecha_actual = str(row.name) if hasattr(row, 'name') else f"Día {i+1}"
+        fecha_actual = str(row.name) if hasattr(row, 'name') else f"Dia {i+1}"
         score_t = float(row.get("SCORE_HISTORICO", 50.0))
 
-        # 1. Obtener la señal técnica/predictiva simulada
+        # 1. Obtener señal simulada
         senal_i = simular_senal_historica(row, score_t)
 
-        # 2. Control de posiciones activas (Gestión de Riesgo)
+        # 2. Gestión de Posición Abierta
         if posicion == 1:
             retorno_unrealized = ((precio_actual - precio_entrada) / precio_entrada) * 100.0
 
-            # Evaluar Stop Loss o Take Profit
             alcanzo_stop = stop_loss_pct is not None and retorno_unrealized <= -abs(stop_loss_pct)
             alcanzo_tp = take_profit_pct is not None and retorno_unrealized >= abs(take_profit_pct)
             es_venta_senal = senal_i in ["VENTA", "VENTA FUERTE"]
 
-            if alcanzó_stop or alcanzó_tp or es_venta_senal:
-                motivo_salida = "Stop Loss" if alcanzó_stop else ("Take Profit" if alcanzó_tp else "Señal Venta")
+            if alcanzo_stop or alcanzo_tp or es_venta_senal:
+                motivo_salida = "Stop Loss" if alcanzo_stop else ("Take Profit" if alcanzo_tp else "Señal Venta")
                 
-                # Ejecutar Venta
                 posicion = 0
                 comision_salida = precio_actual * (comision_pct / 100.0)
                 precio_neto_salida = precio_actual - comision_salida
@@ -102,7 +97,7 @@ def ejecutar_backtest_engine(
                     "capital_resultante": round(capital, 2)
                 })
 
-        # 3. Evaluar nueva Entrada (Compra)
+        # 3. Evaluar Entrada
         elif posicion == 0:
             if senal_i in ["COMPRA FUERTE", "COMPRA"]:
                 posicion = 1
@@ -110,7 +105,7 @@ def ejecutar_backtest_engine(
                 precio_entrada = precio_actual + comision_entrada
                 fecha_entrada = fecha_actual
 
-        # 4. Cálculo de Max Drawdown y seguimiento de capital
+        # 4. Cálculo de Métricas de Capital
         if capital > max_capital:
             max_capital = capital
         drawdown_actual = ((max_capital - capital) / max_capital) * 100.0
@@ -122,7 +117,7 @@ def ejecutar_backtest_engine(
             "capital": round(capital, 2)
         })
 
-    # Métricas consolidadas
+    # Métricas consolidadas finales
     tot_ops = len(operaciones)
     ops_ganadoras = [op for op in operaciones if op.get("retorno_pct", 0) > 0]
     ops_perdedoras = [op for op in operaciones if op.get("retorno_pct", 0) <= 0]
